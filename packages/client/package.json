@@ -3,16 +3,20 @@
   "description": "The tauri wrapper for the retrom client",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev --no-watch --config tauri.dev.conf.json",
-    "build": "tauri build --config tauri.build.conf.json ${BUILD_ARGS:-' '}",
-    "format": "cargo fmt",
-    "format:check": "cargo fmt --check",
-    "lint": "cargo clippy",
-    "lint:fix": "cargo clippy --fix"
-  },
+  "dev": "pnpm vite --port 3000",
+  "build": "copyfiles -u 2 \"web/dist/**/*\" dist",
+  "build:desktop": "vite build --base=./",
+  "tauri": "tauri",
+  "format": "cargo fmt",
+  "format:check": "cargo fmt --check",
+  "lint": "cargo clippy",
+  "lint:fix": "cargo clippy --fix"
+},
   "devDependencies": {
     "@tauri-apps/cli": "2.4.1",
-    "@types/node": "^20",
-    "execa": "^9.3.0"
+    "@types/node": "22.14.0",
+    "copyfiles": "^2.4.1",
+    "execa": "^9.3.0",
+    "vite": "6.2.5"
   }
 }

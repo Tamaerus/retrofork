@@ -1,12 +1,11 @@
 import type { Config } from "tailwindcss";
 import animatePlugin from "tailwindcss-animate";
 import containerQueryPlugin from "@tailwindcss/container-queries";
-import { fontFamily } from "tailwindcss/defaultTheme";
 import plugin from "tailwindcss/plugin";
 
 const config = {
-  darkMode: ["class"],
-  content: ["./src/**/*.{ts,tsx}"],
+  darkMode: "class",
+  content: ["./src/**/*.{ts,tsx,scss}"],
   prefix: "",
   theme: {
     container: {
@@ -21,9 +20,6 @@ const config = {
       },
     },
     extend: {
-      fontFamily: {
-        sans: ["var(--font-sans)", ...fontFamily.sans],
-      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -73,7 +69,7 @@ const config = {
           to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: { height: "var(--radix-accordion-content-height)" },
+          from: { height: "var(--radix-accordion-content-height)" },       
           to: { height: "0" },
         },
         "translate-x": {

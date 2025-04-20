@@ -1,0 +1,19 @@
+{
+  "connection": null,
+  "database": {
+    "url": "postgres://postgres@localhost:5432/retrom"
+  },
+  "contentDirectories": [
+    {
+      "path": "/app/library",
+      "storageType": 1,
+      "ignorePatterns": null,
+      "customLibraryDefinition": null
+    }
+  ],
+  "igdb": {
+  "client_id": "d7zmowboje62zbnvws4275ghz03gt0",
+  "client_secret": "opgo56ac66gfxbety4fkmxtot60egx"
+},
+  "steam": null
+}

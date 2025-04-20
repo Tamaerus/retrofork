@@ -19,6 +19,7 @@ tokio = { workspace = true }
 retrom-codegen = { workspace = true }
 retrom-plugin-config = { workspace = true }
 hyper = { workspace = true }
+hyper-socks2 = { workspace = true }
 tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 hyper-rustls = { workspace = true }

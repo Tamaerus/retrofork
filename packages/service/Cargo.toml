@@ -9,6 +9,9 @@ edition.workspace = true
 description = "The Retrom video game library service"
 
 [dependencies]
+arti-client = { version = "0.29.0", features = ["tokio", "onion-service-client"] }
+tor-rtcompat = { version = "0.29.0", features = ["tokio"] }
+axum = "0.6.20"  # Reverted to match previously working version
 retry = { workspace = true }
 serde = { workspace = true }
 dotenvy = { workspace = true }

@@ -1,9 +1,11 @@
+use hyper::Body;
 use crate::GrpcWebClient;
 use retrom_plugin_config::ConfigExt;
 use serde::de::DeserializeOwned;
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tonic_web::GrpcWebClientLayer;
+use hyper_socks2::SocksConnector; // Add this import
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -37,11 +39,19 @@ impl<R: Runtime> RetromPluginServiceClient<R> {
             .enable_http2()
             .build();
 
-        let client = hyper::Client::builder().build(https);
+        // Wrap the HTTPS connector with a SOCKS5 connector for Tor proxy
+        let socks_connector = SocksConnector {
+            proxy_addr: "socks5://127.0.0.1:9050".parse().expect("Failed to parse Tor proxy URL"),
+            auth: None, // No authentication for Tor
+            connector: https,
+        };
+
+        // Build the hyper client with the SOCKS5 connector
+        let client = hyper::Client::builder().build::<_, hyper::Body>(socks_connector);
 
         tower::ServiceBuilder::new()
             .layer(GrpcWebClientLayer::new())
-            .service(client)
+            .service(hyper::Client)
     }
 
     pub async fn get_service_host(&self) -> String {

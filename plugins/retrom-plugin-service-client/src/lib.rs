@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use hyper::{client::HttpConnector, Uri};
-use hyper_rustls::HttpsConnector;
+use hyper::Uri;
+use hyper_socks2::SocksConnector; // Keep this import
 use retrom_codegen::retrom::{
     emulator_service_client::EmulatorServiceClient, game_service_client::GameServiceClient,
     metadata_service_client::MetadataServiceClient, platform_service_client::PlatformServiceClient,
@@ -10,6 +10,7 @@ use tauri::{
     plugin::{Builder, TauriPlugin},
     Manager, Runtime,
 };
+use tonic_web::GrpcWebClientService;
 
 mod commands;
 mod desktop;
@@ -17,11 +18,14 @@ mod error;
 
 use desktop::RetromPluginServiceClient;
 pub use error::{Error, Result};
-use tonic::body::BoxBody;
-use tonic_web::{GrpcWebCall, GrpcWebClientService};
 
-type GrpcWebClient =
-    GrpcWebClientService<hyper::Client<HttpsConnector<HttpConnector>, GrpcWebCall<BoxBody>>>;
+// Update the GrpcWebClient type alias to match desktop.rs
+type GrpcWebClient = GrpcWebClientService<
+    hyper::Client<
+        SocksConnector<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
+        hyper::Body,
+    >,
+>;
 
 type MetadataClient = MetadataServiceClient<GrpcWebClient>;
 type GameClient = GameServiceClient<GrpcWebClient>;

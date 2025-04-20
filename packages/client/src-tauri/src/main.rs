@@ -5,6 +5,7 @@ use std::{fs::OpenOptions, str};
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}!! You've been greeted from Rust!", name)

@@ -1,8 +1,15 @@
 use std::fs::OpenOptions;
+use std::sync::Arc;
+
+use arti_client::{TorClient, TorClientConfig};
+use tor_rtcompat::PreferredRuntime;
+use hyper::{Request, Body};
+use hyper::client::conn;
+use retrom_service::get_server;
 
 use opentelemetry::{
-    global::{self, ObjectSafeSpan},
-    trace::{Tracer, TracerProvider as _},
+    global,
+    trace::TracerProvider as _,
     KeyValue,
 };
 use opentelemetry_otlp::WithExportConfig;
@@ -19,11 +26,19 @@ use tracing::Level;
 use tracing_opentelemetry::{MetricsLayer, OpenTelemetryLayer};
 use tracing_subscriber::{layer::SubscriberExt, prelude::*, util::SubscriberInitExt};
 
-const NAME: &str = "retrom-service";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing_subscriber();
+
+    // Initialize the Arti client
+    let config = TorClientConfig::default();
+    let tor_client = TorClient::create_bootstrapped(config).await?;
+    let tor_client = Arc::new(tor_client);
+
+    // Test request through Arti to verify Tor connectivity
+    let test_url = "http://check.torproject.org/";
+    let test_response = fetch_onion_url(test_url, &tor_client).await?;
+    println!("Test response: {}", test_response);
 
     #[cfg(not(feature = "embedded_db"))]
     let opts = None;
@@ -33,14 +48,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "embedded_db")]
     let opts: Option<&str> = db_opts.as_deref();
 
-    let (server, _port) = retrom_service::get_server(opts).await;
+    let (server, _port) = get_server(opts).await;
 
-    let tracer = global::tracer(NAME);
-    let mut span = tracer.start("service-thread");
-    let _ = server.await;
-    span.end();
+    if let Err(e) = server.await {
+        eprintln!("Server error: {}", e);
+    }
 
     Ok(())
+}
+
+async fn fetch_onion_url(url: &str, tor_client: &TorClient<PreferredRuntime>) -> Result<String, Box<dyn std::error::Error>> {
+    let host = url.trim_start_matches("http://").trim_end_matches("/");
+    let stream = tor_client
+        .connect_with_prefs(format!("{}:80", host), &arti_client::StreamPrefs::new())
+        .await?;
+
+    let (mut request_sender, connection) = conn::handshake(stream).await?;
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection failed: {}", e);
+        }
+    });
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(url)
+        .body(Body::empty())?;
+    let response = request_sender.send_request(request).await?;
+    let body = hyper::body::to_bytes(response.into_body()).await?;
+    let body_str = String::from_utf8(body.to_vec())?;
+    Ok(body_str)
 }
 
 fn init_tracing_subscriber() {

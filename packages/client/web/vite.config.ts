@@ -32,11 +32,12 @@ const localServiceHost =
 export default defineConfig({
   define: {
     "import.meta.env.VITE_RETROM_VERSION": JSON.stringify(localVersion),
-    "import.meta.env.VITE_RETROM_LOCAL_SERVICE_HOST":
+    "import.meta.env.VITE_RETROM_LOCAL_SERVICE_HOST":    
       JSON.stringify(localServiceHost),
-    "import.meta.env.VITE_RETROM_LOCAL_SERVICE_PORT":
+    "import.meta.env.VITE_RETROM_LOCAL_SERVICE_PORT":    
       JSON.stringify(localServicePort),
   },
+  root: path.resolve(__dirname),
   server: {
     port: 3000,
     host: "0.0.0.0",
@@ -44,7 +45,7 @@ export default defineConfig({
       "/api": {
         target: localServiceHost,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
+        rewrite: (path) => path.replace(/^\/api/, ""),   
       },
     },
   },
@@ -55,7 +56,7 @@ export default defineConfig({
       "/api": {
         target: localServiceHost,
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
+        rewrite: (path) => path.replace(/^\/api/, ""),   
       },
     },
   },
@@ -68,8 +69,10 @@ export default defineConfig({
       "firefox89",
       "opera75",
     ],
+    outDir: 'dist',
+    emptyOutDir: true
   },
-  plugins: [TanStackRouterVite(), react(), glslify()],
+  plugins: [TanStackRouterVite(), react(), glslify()],   
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
