@@ -140,7 +140,8 @@ pub(crate) async fn play_game<R: Runtime>(
         .and_then(|c| c.client_info.map(|info| info.id))
         .expect("Client ID not found");
 
-    let mut emulator_client = app.get_emulator_client().await;
+    let mut emulator_client = app.get_emulator_client().await
+        .map_err(|e| crate::Error::InternalError(format!("Failed to get emulator client: {}", e)))?;
     let res = emulator_client
         .get_local_emulator_configs(GetLocalEmulatorConfigsRequest {
             client_id,
@@ -195,7 +196,7 @@ pub(crate) async fn play_game<R: Runtime>(
     let app = app.clone();
     tokio::select! {
         _ = recv.recv() => {
-            info!("Recieved stop signal for game {}", game_id);
+            info!("Received stop signal for game {}", game_id);
 
             process.kill().await?;
             info!("Killed game process for game {}", game_id);

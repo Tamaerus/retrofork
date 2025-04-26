@@ -129,7 +129,10 @@ impl<R: Runtime> Installer<R> {
         }
 
         if standalone {
-            let mut game_client = self.app_handle.get_game_client().await;
+            let mut game_client = self.app_handle.get_game_client().await.map_err(|e| {
+                tracing::error!("Failed to get game client: {:?}", e);
+                crate::error::Error::InternalError(format!("Failed to get game client: {:?}", e))
+            })?;
             let games = game_client
                 .get_games(GetGamesRequest::default())
                 .await?
@@ -157,7 +160,10 @@ impl<R: Runtime> Installer<R> {
             }
         };
 
-        let mut game_client = self.app_handle.get_game_client().await;
+        let mut game_client = self.app_handle.get_game_client().await.map_err(|e| {
+            tracing::error!("Failed to get game client: {:?}", e);
+            crate::error::Error::InternalError(format!("Failed to get game client: {:?}", e))
+        })?;
         let games = game_client
             .get_games(GetGamesRequest::default())
             .await?
@@ -196,7 +202,7 @@ impl<R: Runtime> Installer<R> {
         debug!("Game installation started: {}", game_id);
     }
 
-    #[instrument(skip(self), fields(game_id, field_id))]
+    #[instrument(skip(self), fields(game_id, file_id))]
     pub async fn mark_file_installed(&self, game_id: GameId, file_id: FileId) {
         debug!("Marking file as installed: {}", file_id);
 

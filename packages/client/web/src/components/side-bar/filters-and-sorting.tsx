@@ -24,6 +24,9 @@ import {
   AccordionTrigger,
 } from "../ui/accordion";
 import { Checkbox } from "../ui/checkbox";
+import { OnionInput } from "../ui/onion-input";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
 export function FiltersAndSorting() {
   const {
@@ -42,6 +45,27 @@ export function FiltersAndSorting() {
   } = useFilterAndSort();
 
   const labelStyles = cn("pl-1 font-medium text-muted-foreground text-sm");
+  const OnionInputWithNavigation = () => {
+    const [url, setUrl] = useState("");
+    const router = useRouter();
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && url.trim()) {
+        router.navigate({ to: "/browser", search: { url: url.trim() } });
+        setUrl(""); // Clear input after navigation
+      }
+    };
+
+    return (
+      <OnionInput
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Enter .onion URL..."
+        className="mt-2"
+      />
+    );
+  };
 
   return (
     <div className="flex flex-col gap-3 px-3 sm:px-4 pt-2 pb-4">
@@ -163,6 +187,7 @@ export function FiltersAndSorting() {
           </AccordionTrigger>
         </AccordionItem>
       </Accordion>
+      <OnionInputWithNavigation />
     </div>
   );
 }

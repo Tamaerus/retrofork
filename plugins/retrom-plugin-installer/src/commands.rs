@@ -36,19 +36,28 @@ pub async fn install_game<R: Runtime>(
     }
 
     if game.third_party {
-        let mut platform_svc_client = app_handle.get_platform_client().await;
+        let mut platform_svc_client = app_handle
+            .get_platform_client()
+            .await
+            .map_err(|e| crate::error::Error::InternalError(format!("Platform client error: {e}")))?;
 
-        let steam_id = u32::try_from(game.steam_app_id()).expect("Could not convert steam id");
+let steam_id = match game.steam_app_id {
+    Some(id) => u32::try_from(id).expect("Could not convert steam id"),
+    None => {
+        tracing::error!("No Steam App ID found for game: {:?}", game);
+        return Err(crate::error::Error::InternalError("No Steam App ID found".into()));
+    }
+};
 
-        let platform_res = platform_svc_client
-            .get_platforms(GetPlatformsRequest {
-                ids: vec![game.platform_id()],
-                ..Default::default()
-            })
-            .await?
-            .into_inner();
+let platform_res = platform_svc_client
+    .get_platforms(GetPlatformsRequest {
+        ids: vec![game.platform_id()],
+        ..Default::default()
+    })
+    .await?
+    .into_inner();
 
-        let platform = platform_res.platforms.into_iter().next();
+let platform = platform_res.platforms.into_iter().next();
 
         let platform_path = match platform {
             Some(platform) => platform.path.clone(),

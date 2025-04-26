@@ -1,11 +1,15 @@
 use serde::{ser::Serializer, Serialize};
+use std::error::Error as StdError;
 
 pub type Result<T> = std::result::Result<T, Error>;
+pub type BoxDynError = Box<dyn StdError + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl Serialize for Error {

@@ -14,6 +14,7 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRoute } from './routes/__root'
 import { Route as FullscreenLayoutImport } from './routes/_fullscreenLayout'
+import { Route as BrowserIndexImport } from './routes/browser/index'
 import { Route as windowedLayoutImport } from './routes/(windowed)/_layout'
 import { Route as windowedLayoutGamesGameIdIndexImport } from './routes/(windowed)/_layout/games/$gameId/index'
 
@@ -42,6 +43,11 @@ const windowedRoute = windowedImport.update({
 
 const FullscreenLayoutRoute = FullscreenLayoutImport.update({
   id: '/_fullscreenLayout',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const BrowserIndexRoute = BrowserIndexImport.update({
+  path: '/browser/',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -120,6 +126,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof windowedLayoutImport
       parentRoute: typeof windowedRoute
     }
+    '/browser/': {
+      id: '/browser/'
+      path: '/browser'
+      fullPath: '/browser'
+      preLoaderRoute: typeof BrowserIndexImport
+      parentRoute: typeof rootRoute
+    }
     '/(windowed)/_layout/home': {
       id: '/_layout/home'
       path: '/home'
@@ -172,6 +185,7 @@ export const routeTree = rootRoute.addChildren({
       windowedLayoutGamesGameIdIndexRoute,
     }),
   }),
+  BrowserIndexRoute,
 })
 
 /* prettier-ignore-end */
@@ -183,7 +197,8 @@ export const routeTree = rootRoute.addChildren({
       "filePath": "__root.tsx",
       "children": [
         "/_fullscreenLayout",
-        "/"
+        "/",
+        "/browser/"
       ]
     },
     "/_fullscreenLayout": {
@@ -207,6 +222,9 @@ export const routeTree = rootRoute.addChildren({
         "/_layout/home",
         "/_layout/games/$gameId/"
       ]
+    },
+    "/browser/": {
+      "filePath": "browser/index.tsx"
     },
     "/_layout/home": {
       "filePath": "(windowed)/_layout/home.lazy.tsx",

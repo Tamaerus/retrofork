@@ -1,0 +1,24 @@
+2025-04-26 00:12:25.128 EDT [15000] LOG:  starting PostgreSQL 17.4 on x86_64-windows, compiled by msvc-19.42.34436, 64-bit
+2025-04-26 00:12:25.133 EDT [15000] LOG:  listening on IPv6 address "::1", port 5432
+2025-04-26 00:12:25.133 EDT [15000] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-04-26 00:12:25.193 EDT [17272] LOG:  database system was shut down at 2025-04-26 00:10:07 EDT
+2025-04-26 00:12:25.223 EDT [15000] LOG:  database system is ready to accept connections
+2025-04-26 00:12:34.884 EDT [15000] LOG:  received fast shutdown request
+2025-04-26 00:12:34.888 EDT [15000] LOG:  aborting any active transactions
+2025-04-26 00:12:34.897 EDT [15000] LOG:  background worker "logical replication launcher" (PID 1496) exited with exit code 1
+2025-04-26 00:12:34.898 EDT [4048] LOG:  shutting down
+2025-04-26 00:12:34.901 EDT [4048] LOG:  checkpoint starting: shutdown immediate
+2025-04-26 00:12:34.924 EDT [4048] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.004 s, sync=0.004 s, total=0.026 s; sync files=2, longest=0.002 s, average=0.002 s; distance=0 kB, estimate=0 kB; lsn=0/1B0D410, redo lsn=0/1B0D410
+2025-04-26 00:12:34.935 EDT [15000] LOG:  database system is shut down
+2025-04-26 01:52:08.717 EDT [14444] LOG:  starting PostgreSQL 17.4 on x86_64-windows, compiled by msvc-19.42.34436, 64-bit
+2025-04-26 01:52:08.724 EDT [14444] LOG:  listening on IPv6 address "::1", port 5432
+2025-04-26 01:52:08.724 EDT [14444] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-04-26 01:52:08.795 EDT [4012] LOG:  database system was shut down at 2025-04-26 00:12:34 EDT
+2025-04-26 01:52:08.830 EDT [14444] LOG:  database system is ready to accept connections
+2025-04-26 01:52:53.362 EDT [14444] LOG:  received fast shutdown request
+2025-04-26 01:52:53.365 EDT [14444] LOG:  aborting any active transactions
+2025-04-26 01:52:53.374 EDT [14444] LOG:  background worker "logical replication launcher" (PID 8436) exited with exit code 1
+2025-04-26 01:52:53.375 EDT [13920] LOG:  shutting down
+2025-04-26 01:52:53.378 EDT [13920] LOG:  checkpoint starting: shutdown immediate
+2025-04-26 01:52:53.398 EDT [13920] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.005 s, sync=0.004 s, total=0.023 s; sync files=2, longest=0.002 s, average=0.002 s; distance=0 kB, estimate=0 kB; lsn=0/1B0D4C0, redo lsn=0/1B0D4C0
+2025-04-26 01:52:53.410 EDT [14444] LOG:  database system is shut down

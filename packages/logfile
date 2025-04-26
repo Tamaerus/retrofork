@@ -16,3 +16,33 @@
 2025-04-14 19:12:39.342 EDT [15144] LOG:  checkpoint starting: shutdown immediate
 2025-04-14 19:12:39.356 EDT [15144] LOG:  checkpoint complete: wrote 0 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.017 s; sync files=0, longest=0.000 s, average=0.000 s; distance=0 kB, estimate=0 kB; lsn=0/1B05AA0, redo lsn=0/1B05AA0
 2025-04-14 19:12:39.366 EDT [14936] LOG:  database system is shut down
+2025-04-22 16:47:34.777 EDT [23016] LOG:  starting PostgreSQL 17.4 on x86_64-windows, compiled by msvc-19.42.34436, 64-bit
+2025-04-22 16:47:34.781 EDT [23016] LOG:  listening on IPv6 address "::1", port 5432
+2025-04-22 16:47:34.781 EDT [23016] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-04-22 16:47:34.853 EDT [14100] LOG:  database system was interrupted; last known up at 2025-04-19 14:25:26 EDT
+2025-04-22 16:47:35.466 EDT [14100] LOG:  database system was not properly shut down; automatic recovery in progress
+2025-04-22 16:47:35.474 EDT [14100] LOG:  redo starts at 0/1B06E50
+2025-04-22 16:47:35.474 EDT [14100] LOG:  invalid record length at 0/1B06F58: expected at least 24, got 0
+2025-04-22 16:47:35.474 EDT [14100] LOG:  redo done at 0/1B06F20 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2025-04-22 16:47:35.482 EDT [7368] LOG:  checkpoint starting: end-of-recovery immediate wait
+2025-04-22 16:47:35.504 EDT [7368] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.004 s, sync=0.004 s, total=0.025 s; sync files=2, longest=0.002 s, average=0.002 s; distance=0 kB, estimate=0 kB; lsn=0/1B06F58, redo lsn=0/1B06F58
+2025-04-22 16:47:35.525 EDT [23016] LOG:  database system is ready to accept connections
+2025-04-22 16:47:52.650 EDT [23016] LOG:  received fast shutdown request
+2025-04-22 16:47:52.655 EDT [23016] LOG:  aborting any active transactions
+2025-04-22 16:47:52.664 EDT [23016] LOG:  background worker "logical replication launcher" (PID 6556) exited with exit code 1
+2025-04-22 16:47:52.665 EDT [7368] LOG:  shutting down
+2025-04-22 16:47:52.667 EDT [7368] LOG:  checkpoint starting: shutdown immediate
+2025-04-22 16:47:52.680 EDT [7368] LOG:  checkpoint complete: wrote 0 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.016 s; sync files=0, longest=0.000 s, average=0.000 s; distance=0 kB, estimate=0 kB; lsn=0/1B07008, redo lsn=0/1B07008
+2025-04-22 16:47:52.691 EDT [23016] LOG:  database system is shut down
+2025-04-23 14:31:53.750 EDT [4412] LOG:  starting PostgreSQL 17.4 on x86_64-windows, compiled by msvc-19.42.34436, 64-bit
+2025-04-23 14:31:53.766 EDT [4412] LOG:  listening on IPv6 address "::1", port 5432
+2025-04-23 14:31:53.766 EDT [4412] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-04-23 14:31:53.965 EDT [18700] LOG:  database system was shut down at 2025-04-23 02:40:15 EDT
+2025-04-23 14:31:54.064 EDT [4412] LOG:  database system is ready to accept connections
+2025-04-23 14:32:42.795 EDT [4412] LOG:  received fast shutdown request
+2025-04-23 14:32:42.829 EDT [4412] LOG:  aborting any active transactions
+2025-04-23 14:32:42.847 EDT [4412] LOG:  background worker "logical replication launcher" (PID 21528) exited with exit code 1
+2025-04-23 14:32:42.850 EDT [14840] LOG:  shutting down
+2025-04-23 14:32:42.853 EDT [14840] LOG:  checkpoint starting: shutdown immediate
+2025-04-23 14:32:42.886 EDT [14840] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.010 s, sync=0.005 s, total=0.037 s; sync files=2, longest=0.003 s, average=0.003 s; distance=0 kB, estimate=0 kB; lsn=0/1B07270, redo lsn=0/1B07270
+2025-04-23 14:32:42.909 EDT [4412] LOG:  database system is shut down

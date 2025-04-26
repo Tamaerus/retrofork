@@ -30,7 +30,7 @@
   },
  "build": {
   "devUrl": "http://localhost:3000",
-  "beforeDevCommand": "pnpm dev",
+  "beforeDevCommand": "",
   "beforeBuildCommand": "pnpm build:desktop"
 },
   "productName": "Retrom",

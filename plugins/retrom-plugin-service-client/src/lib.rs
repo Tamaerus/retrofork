@@ -1,16 +1,17 @@
+// File: retrofork/plugins/retrom-plugin-service-client/src/lib.rs
 use std::str::FromStr;
-
 use hyper::Uri;
-use hyper_socks2::SocksConnector; // Keep this import
 use retrom_codegen::retrom::{
-    emulator_service_client::EmulatorServiceClient, game_service_client::GameServiceClient,
-    metadata_service_client::MetadataServiceClient, platform_service_client::PlatformServiceClient,
+    emulator_service_client::EmulatorServiceClient,
+    game_service_client::GameServiceClient,
+    metadata_service_client::MetadataServiceClient,
+    platform_service_client::PlatformServiceClient,
 };
 use tauri::{
-    plugin::{Builder, TauriPlugin},
-    Manager, Runtime,
+    plugin::{Builder, TauriPlugin}, Manager, Runtime
 };
-use tonic_web::GrpcWebClientService;
+use std::error::Error as StdError;
+use tower::util::ServiceExt;
 
 mod commands;
 mod desktop;
@@ -19,82 +20,71 @@ mod error;
 use desktop::RetromPluginServiceClient;
 pub use error::{Error, Result};
 
-// Update the GrpcWebClient type alias to match desktop.rs
-type GrpcWebClient = GrpcWebClientService<
-    hyper::Client<
-        SocksConnector<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
-        hyper::Body,
-    >,
->;
+type BoxDynError = Box<dyn StdError + Send + Sync + 'static>;
 
-type MetadataClient = MetadataServiceClient<GrpcWebClient>;
-type GameClient = GameServiceClient<GrpcWebClient>;
-type EmulatorClient = EmulatorServiceClient<GrpcWebClient>;
-type PlatformClient = PlatformServiceClient<GrpcWebClient>;
+type GrpcChannel = tonic::transport::Channel;
 
-/// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the retrom-plugin-service-client APIs.
+type MetadataClient = MetadataServiceClient<GrpcChannel>;
+type GameClient = GameServiceClient<GrpcChannel>;
+type EmulatorClient = EmulatorServiceClient<GrpcChannel>;
+type PlatformClient = PlatformServiceClient<GrpcChannel>;
+
 pub trait RetromPluginServiceClientExt<R: Runtime> {
     fn service_client(&self) -> &RetromPluginServiceClient<R>;
-    fn get_metadata_client(&self) -> impl std::future::Future<Output = MetadataClient>;
-    fn get_game_client(&self) -> impl std::future::Future<Output = GameClient>;
-    fn get_emulator_client(&self) -> impl std::future::Future<Output = EmulatorClient>;
-    fn get_platform_client(&self) -> impl std::future::Future<Output = PlatformClient>;
+    async fn get_metadata_client(&self) -> Result<MetadataClient>;
+    async fn get_game_client(&self) -> Result<GameClient>;
+    async fn get_emulator_client(&self) -> Result<EmulatorClient>;
+    async fn get_platform_client(&self) -> Result<PlatformClient>;
+    fn init_plugin() -> TauriPlugin<R>;
 }
 
-impl<R: Runtime, T: Manager<R>> crate::RetromPluginServiceClientExt<R> for T {
+impl<R: Runtime, T: Manager<R>> RetromPluginServiceClientExt<R> for T {
     fn service_client(&self) -> &RetromPluginServiceClient<R> {
         self.state::<RetromPluginServiceClient<R>>().inner()
     }
 
-    async fn get_platform_client(&self) -> PlatformClient {
+    async fn get_metadata_client(&self) -> Result<MetadataClient> {
         let state = self.service_client();
-        let host = state.get_service_host().await;
-
-        let uri = Uri::from_str(&host).expect("Could not parse URI");
-        let grpc_web_client = state.get_grpc_web_client();
-
-        PlatformServiceClient::with_origin(grpc_web_client, uri)
+        let host = state.get_service_host().await.to_string();
+        let uri = Uri::from_str(&host).map_err(|e| Error::Other(e.to_string()))?;
+        let channel = tonic::transport::Channel::builder(uri).connect_lazy();
+        Ok(MetadataServiceClient::new(channel))
     }
 
-    async fn get_emulator_client(&self) -> EmulatorClient {
+    async fn get_game_client(&self) -> Result<GameClient> {
         let state = self.service_client();
-        let host = state.get_service_host().await;
-
-        let uri = Uri::from_str(&host).expect("Could not parse URI");
-        let grpc_web_client = state.get_grpc_web_client();
-
-        EmulatorServiceClient::with_origin(grpc_web_client, uri)
+        let host = state.get_service_host().await.to_string();
+        let uri = Uri::from_str(&host).map_err(|e| Error::Other(e.to_string()))?;
+        let channel = tonic::transport::Channel::builder(uri).connect_lazy();
+        Ok(GameServiceClient::new(channel))
     }
 
-    async fn get_game_client(&self) -> GameClient {
+    async fn get_emulator_client(&self) -> Result<EmulatorClient> {
         let state = self.service_client();
-        let host = state.get_service_host().await;
-
-        let uri = Uri::from_str(&host).expect("Could not parse URI");
-        let grpc_web_client = state.get_grpc_web_client();
-
-        GameServiceClient::with_origin(grpc_web_client, uri)
+        let host = state.get_service_host().await.to_string();
+        let uri = Uri::from_str(&host).map_err(|e| Error::Other(e.to_string()))?;
+        let channel = tonic::transport::Channel::builder(uri).connect_lazy();
+        Ok(EmulatorServiceClient::new(channel))
     }
 
-    async fn get_metadata_client(&self) -> MetadataClient {
+    async fn get_platform_client(&self) -> Result<PlatformClient> {
         let state = self.service_client();
-        let host = state.get_service_host().await;
-
-        let uri = Uri::from_str(&host).expect("Could not parse URI");
-        let grpc_web_client = state.get_grpc_web_client();
-
-        MetadataServiceClient::with_origin(grpc_web_client, uri)
+        let host = state.get_service_host().await.to_string();
+        let uri = Uri::from_str(&host).map_err(|e| Error::Other(e.to_string()))?;
+        let channel = tonic::transport::Channel::builder(uri).connect_lazy();
+        Ok(PlatformServiceClient::new(channel))
     }
-}
 
-/// Initializes the plugin.
-pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("retrom-plugin-service-client")
-        // .invoke_handler(tauri::generate_handler![commands::ping])
-        .setup(|app, api| {
-            let retrom_plugin_service_client = desktop::init(app, api)?;
-            app.manage(retrom_plugin_service_client);
-            Ok(())
-        })
-        .build()
+    fn init_plugin() -> TauriPlugin<R> {
+        Builder::new("retrom-plugin-service-client")
+            .setup(|app, _api| {
+                let client = RetromPluginServiceClient::new(app.clone(), "".to_string())?;
+                app.manage(client);
+                Ok(())
+            })
+            .build()
+    }
+    
+    
+    
 }

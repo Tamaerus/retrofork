@@ -80,7 +80,13 @@ impl<R: Runtime> Launcher<R> {
             warn!("Game {} is not running", game_id);
         }
 
-        let mut metadata_client = self.app_handle.get_metadata_client().await;
+        let mut metadata_client = match self.app_handle.get_metadata_client().await {
+            Ok(client) => client,
+            Err(why) => {
+                warn!("Failed to get metadata client: {:#?}", why);
+                return Ok(());
+            }
+        };
 
         let req = tonic::Request::new(GetGameMetadataRequest {
             game_ids: vec![game_id],
@@ -165,7 +171,7 @@ impl<R: Runtime> Launcher<R> {
         #[cfg(target_os = "macos")]
         {
             let path: PathBuf = PathBuf::from(program);
-            let program = if path.extension().is_some_and(|ext| ext == "app") {
+            let program = if path.extension().map(|ext| ext == "app").unwrap_or(false) {
                 path.join("Contents/MacOS/").join(path.file_stem().unwrap())
             } else {
                 path
