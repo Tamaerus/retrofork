@@ -1,4 +1,3 @@
-// 1. Update onion-input.tsx to rename the component to OnionInput
 // File: retrofork/packages/client/web/src/components/ui/onion-input.tsx
 import * as React from "react";
 

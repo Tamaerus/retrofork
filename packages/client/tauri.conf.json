@@ -30,7 +30,7 @@
   },
  "build": {
   "devUrl": "http://localhost:3000",
-  "beforeDevCommand": "pnpm dev",
+  "beforeDevCommand": "cd web && pnpm vite --port 3000",
   "beforeBuildCommand": "pnpm build:desktop"
 },
   "productName": "Retrom",
