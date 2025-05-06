@@ -54,7 +54,8 @@ hyper-proxy = "0.9"
 hyper-socks2 = { workspace = true }
 hyper-tls = "0.5"
 tauri-plugin-window-state = "2.2.0"
-
+arti-client = "0.29.0"
+tor-rtcompat = "0.29.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.

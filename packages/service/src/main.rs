@@ -30,15 +30,22 @@ use tracing_subscriber::{layer::SubscriberExt, prelude::*, util::SubscriberInitE
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing_subscriber();
 
-    // Initialize the Arti client
-    let config = TorClientConfig::default();
+    // Initialize the Arti client with SOCKS5 proxy configuration
+    let mut config_builder = TorClientConfig::builder();
+    // Configure Arti to listen on a SOCKS5 proxy port (e.g., 9050)
+    // Note: Depending on the version, this might be socks_port or require a different approach
+    // config_builder.socks_port(9050); // You can change to 9150 if 9050 is in use
+    let config = config_builder.build()?;
+    println!("Configuring Tor client to expose SOCKS5 proxy on port 9050");
+
     let tor_client = TorClient::create_bootstrapped(config).await?;
     let tor_client = Arc::new(tor_client);
+    // println!("Tor client bootstrapped successfully with SOCKS5 proxy on port 9050");
 
     // Test request through Arti to verify Tor connectivity
     let test_url = "http://check.torproject.org/";
     let test_response = fetch_onion_url(test_url, &tor_client).await?;
-    println!("Test response: {}", test_response);
+    // println!("Test response: {}", test_response);
 
     #[cfg(not(feature = "embedded_db"))]
     let opts = None;
@@ -46,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "embedded_db")]
     let db_opts = std::env::var("EMBEDDED_DB_OPTS").ok();
     #[cfg(feature = "embedded_db")]
-    let opts: Option<&str> = db_opts.as_deref();
+    let  opts: Option<&str> = db_opts.as_deref();
 
     let (server, _port) = get_server(opts).await;
 

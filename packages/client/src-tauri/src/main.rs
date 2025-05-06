@@ -1,3 +1,4 @@
+// retrofork/packages/client/src-tauri/src/main.rs
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -10,6 +11,14 @@ use hyper::client::HttpConnector;
 use hyper_proxy::{Proxy, ProxyConnector, Intercept};
 use hyper_tls::HttpsConnector;
 use tracing::{info, error};
+use arti_client::{TorClient, TorClientConfig};
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tauri::State;
+use tokio::sync::Mutex;
+
+// Import the correct runtime type for TorClient
+use tor_rtcompat::PreferredRuntime;
 
 // Import dotenvy for environment variable loading
 use dotenvy;
@@ -21,135 +30,169 @@ use tauri_plugin_fs;
 use retrom_plugin_config;
 use retrom_plugin_standalone;
 use retrom_plugin_installer;
+use tauri_plugin_updater;
+use tauri_plugin_single_instance;
+use tauri_plugin_opener;
+use tauri_plugin_shell;
+use tauri_plugin_system_info;
+use tauri_plugin_dialog;
+use tauri_plugin_process;
+use tauri_plugin_window_state;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}!! You've been greeted from Rust!", name)
 }
 
+// Shared state for TorClient to avoid creating multiple instances
+// Specify the runtime type for TorClient using PreferredRuntime from tor_rtcompat
+type TorClientState = Mutex<Option<Arc<TorClient<PreferredRuntime>>>>;
+
 #[tauri::command(async)]
-async fn fetch_onion_url(url: String) -> Result<String, String> {
-    // Log that the command was invoked
+async fn fetch_onion_url(url: String, state: State<'_, TorClientState>) -> Result<String, String> {
+    // Log that the command was invoked with the exact URL
     info!("Attempting to fetch onion URL: {}", url);
 
-    // Validate the URL to ensure it ends with .onion (basic check)
-    if !url.ends_with(".onion") {
-        let err_msg = "Invalid URL: Must be a .onion address".to_string();
+    // Basic validation: just check if it contains ".onion"
+    if !url.contains(".onion") {
+        let err_msg = "Invalid URL: Must contain a .onion address".to_string();
         error!("{}", err_msg);
         return Err(err_msg);
     }
-    info!("Setting up Tor proxy client for socks5://localhost:9050");
-    let mut http = HttpConnector::new();
-    http.enforce_http(false);
-    let https = HttpsConnector::new_with_connector(http);
-    let proxy = Proxy::new(Intercept::All, "socks5h://127.0.0.1:9050".parse().unwrap());
-    let proxy_connector = ProxyConnector::from_proxy(https, proxy).expect("Failed to create proxy connector");
-    let client = Client::builder().build::<_, hyper::Body>(proxy_connector);
-    info!("Tor SOCKS5 client setup complete");
 
-    // Build the request for the .onion URL
-    // Hyper expects a valid URI, so we must use http:// or https:// with the .onion host
-    let onion_url = if url.starts_with("http://") || url.starts_with("https://") {
-        url.clone()
+    // Get or initialize the Tor client from shared state
+    let tor_client = {
+        let mut guard = state.lock().await; // Use async lock
+        if let Some(client) = guard.as_ref() {
+            info!("Reusing existing Tor client");
+            client.clone()
+        } else {
+            info!("Setting up Arti (Tor) client directly");
+            let config = TorClientConfig::default();
+            match TorClient::create_bootstrapped(config).await {
+                Ok(client) => {
+                    info!("Tor client bootstrapped successfully");
+                    let client_arc = Arc::new(client);
+                    *guard = Some(client_arc.clone());
+                    client_arc
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to bootstrap Tor client: {}", e);
+                    error!("{}", err_msg);
+                    return Err(err_msg);
+                }
+            }
+        }
+    };
+
+    // Extract host (the .onion part) for Tor connection
+    let host = url
+        .split('/')
+        .find(|part| part.ends_with(".onion"))
+        .map(|part| part.to_string())
+        .ok_or_else(|| {
+            let err_msg = "Failed to extract .onion host from URL".to_string();
+            error!("{}", err_msg);
+            err_msg
+        })?;
+    info!("Connecting to onion host: {}", host);
+
+    // Connect to the onion service (assuming port 80 for HTTP)
+    let mut stream = match tor_client.connect(format!("{}:80", host)).await {
+        Ok(stream) => {
+            info!("Connected to onion service successfully");
+            stream
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to connect to onion service: {}", e);
+            error!("{}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    // Build a simple HTTP GET request, preserving the full path
+    let request_path = if url.contains(&host) {
+        url.split_once(&host).map(|(_, path)| path).unwrap_or("")
     } else {
-        format!("http://{}", url)
+        ""
     };
-    info!("Building GET request for {}", onion_url);
-    let request = match Request::builder()
-        .method("GET")
-        .uri(&onion_url)
-        .body(Body::empty())
-    {
-        Ok(req) => {
-            info!("Request built successfully");
-            req
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to build request: {}", e);
-            error!("{}", err_msg);
-            return Err(err_msg);
-        }
-    };
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        if request_path.is_empty() { "/" } else { request_path },
+        host
+    );
+    info!("Sending request with path: {}", if request_path.is_empty() { "/" } else { request_path });
 
-    // Send the request through the Tor proxy
-    info!("Sending request to {}", url);
-    let response = match client.request(request).await {
-        Ok(resp) => {
-            info!("Received response with status: {}", resp.status());
-            resp
-        }
-        Err(e) => {
-            let err_msg = format!("Request failed: {}", e);
-            error!("{}", err_msg);
-            return Err(err_msg);
-        }
-    };
-
-    // Check if the response status is successful
-    let status = response.status();
-    if !status.is_success() {
-        let err_msg = format!("Request failed with status: {}", status);
+    // Write the request to the stream using async I/O
+    if let Err(e) = stream.write_all(request.as_bytes()).await {
+        let err_msg = format!("Failed to send request: {}", e);
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+    if let Err(e) = stream.flush().await {
+        let err_msg = format!("Failed to flush request: {}", e);
         error!("{}", err_msg);
         return Err(err_msg);
     }
 
-    // Read the response body as text
-    info!("Reading response body");
-    let body_bytes = match hyper::body::to_bytes(response.into_body()).await {
-        Ok(bytes) => {
-            info!("Response body read successfully ({} bytes)", bytes.len());
-            bytes
+    // Read the response
+    let mut response = String::new();
+    let mut buffer = [0; 4096];
+    loop {
+        match stream.read(&mut buffer).await {
+            Ok(0) => {
+                info!("Received complete response from onion service");
+                break;
+            }
+            Ok(n) => {
+                let chunk = match std::str::from_utf8(&buffer[..n]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => {
+                        let err_msg = format!("Failed to decode response chunk as UTF-8: {}", e);
+                        error!("{}", err_msg);
+                        return Err(err_msg);
+                    }
+                };
+                response.push_str(&chunk);
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to read response: {}", e);
+                error!("{}", err_msg);
+                return Err(err_msg);
+            }
         }
-        Err(e) => {
-            let err_msg = format!("Failed to read response body: {}", e);
-            error!("{}", err_msg);
-            return Err(err_msg);
-        }
-    };
+    }
 
-    let body_text = match std::str::from_utf8(&body_bytes) {
-        Ok(text) => {
-            info!("Response body decoded as UTF-8 successfully");
-            text.to_string()
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to decode response as UTF-8: {}", e);
-            error!("{}", err_msg);
-            return Err(err_msg);
-        }
-    };
-
-    Ok(body_text)
+    info!("Response received ({} bytes)", response.len());
+    Ok(response)
 }
 
 #[tokio::main]
-pub async fn main() {
+async fn main() {
     dotenvy::dotenv().ok();
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "info,".into())
-        .add_directive("app=warn".parse().unwrap());
-
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .pretty()
-        .without_time()
-        .with_target(false)
-        .with_ansi(true);
-
-    let registry = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt_layer);
-
-    tauri::async_runtime::set(tokio::runtime::Handle::current());
+    // We'll delay full tracing initialization until we have the log directory in setup
+    // For now, do minimal initialization or none at all
+    // Avoid moving layers prematurely
 
     tauri::Builder::default()
+        .manage(Mutex::new(None::<Arc<TorClient<PreferredRuntime>>>) as TorClientState) // Initialize empty TorClient state
         .setup(|app| {
-            let log_dir = app.path().app_log_dir().expect("failed to get log dir");
+            // Define env_filter and fmt_layer inside setup to avoid move issues
+            let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,".into())
+                .add_directive("app=warn".parse().unwrap());
 
+            let fmt_layer = tracing_subscriber::fmt::layer()
+                .pretty()
+                .without_time()
+                .with_target(false)
+                .with_ansi(true);
+
+            let log_dir = app.path().app_log_dir().expect("failed to get log dir");
             if !log_dir.exists() {
                 std::fs::create_dir_all(&log_dir).unwrap();
             }
-
             let log_file = OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -161,9 +204,12 @@ pub async fn main() {
                 .json()
                 .with_writer(log_file);
 
-            registry.with(file_layer).init();
-
-            // Window state plugin is registered outside setup via .plugin(), so nothing to do here.
+            // Initialize tracing with all layers at once inside setup
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .with(file_layer)
+                .init();
 
             let app_handle_ctrlc = app.handle().clone();
             tokio::spawn(async move {
@@ -174,11 +220,16 @@ pub async fn main() {
                 app_handle_ctrlc.exit(0);
             });
 
-            // Await and register the async launcher plugin
-            let app_handle = app.handle();
-            tauri::async_runtime::block_on(async {
+            // Handle async initialization of launcher plugin without blocking
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                println!("Initializing launcher plugin asynchronously...");
                 let launcher_plugin = retrom_plugin_launcher::init().await;
-                app_handle.plugin(launcher_plugin);
+                if let Err(e) = app_handle.plugin(launcher_plugin) {
+                    eprintln!("Failed to register launcher plugin: {}", e);
+                } else {
+                    println!("Launcher plugin registered successfully after async init");
+                }
             });
 
             Ok(())
@@ -205,7 +256,7 @@ pub async fn main() {
         .plugin(retrom_plugin_steam::init())
         .plugin(retrom_plugin_installer::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![greet, fetch_onion_url]) // Add our command here
+        .invoke_handler(tauri::generate_handler![greet, fetch_onion_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

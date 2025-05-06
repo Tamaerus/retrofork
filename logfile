@@ -22,3 +22,17 @@
 2025-04-26 01:52:53.378 EDT [13920] LOG:  checkpoint starting: shutdown immediate
 2025-04-26 01:52:53.398 EDT [13920] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.005 s, sync=0.004 s, total=0.023 s; sync files=2, longest=0.002 s, average=0.002 s; distance=0 kB, estimate=0 kB; lsn=0/1B0D4C0, redo lsn=0/1B0D4C0
 2025-04-26 01:52:53.410 EDT [14444] LOG:  database system is shut down
+2025-05-05 23:14:09.654 EDT [23900] LOG:  starting PostgreSQL 17.4 on x86_64-windows, compiled by msvc-19.42.34436, 64-bit
+2025-05-05 23:14:09.677 EDT [23900] LOG:  listening on IPv6 address "::1", port 5432
+2025-05-05 23:14:09.678 EDT [23900] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2025-05-05 23:14:09.894 EDT [25336] LOG:  database system was shut down at 2025-05-05 23:13:06 EDT
+2025-05-05 23:14:09.985 EDT [23900] LOG:  database system is ready to accept connections
+2025-05-05 23:19:09.890 EDT [24288] LOG:  checkpoint starting: time
+2025-05-05 23:19:09.924 EDT [24288] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.009 s, sync=0.006 s, total=0.035 s; sync files=2, longest=0.004 s, average=0.003 s; distance=0 kB, estimate=0 kB; lsn=0/1B0E7C0, redo lsn=0/1B0E768
+2025-05-06 00:15:01.691 EDT [23900] LOG:  received fast shutdown request
+2025-05-06 00:15:01.695 EDT [23900] LOG:  aborting any active transactions
+2025-05-06 00:15:01.702 EDT [23900] LOG:  background worker "logical replication launcher" (PID 3220) exited with exit code 1
+2025-05-06 00:15:01.703 EDT [24288] LOG:  shutting down
+2025-05-06 00:15:01.705 EDT [24288] LOG:  checkpoint starting: shutdown immediate
+2025-05-06 00:15:01.718 EDT [24288] LOG:  checkpoint complete: wrote 0 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.015 s; sync files=0, longest=0.000 s, average=0.000 s; distance=0 kB, estimate=0 kB; lsn=0/1B0E870, redo lsn=0/1B0E870
+2025-05-06 00:15:01.729 EDT [23900] LOG:  database system is shut down

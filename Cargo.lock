@@ -6260,6 +6260,7 @@ dependencies = [
 name = "retrom-client"
 version = "0.7.20"
 dependencies = [
+ "arti-client",
  "dotenvy",
  "futures",
  "hyper 0.14.32",
@@ -6296,6 +6297,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tonic 0.11.0",
+ "tor-rtcompat",
  "tracing",
  "tracing-subscriber",
 ]
