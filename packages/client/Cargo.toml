@@ -47,7 +47,7 @@ tauri-plugin-system-info = "2.0.8"
 tauri-plugin-single-instance = "2.0.0-rc.0"
 tauri-plugin-updater = "2.0.0-rc.2"
 starship-battery = "0.8.3"  # From earlier build output
-sysinfo = "0.30.13"  # From earlier build output
+sysinfo = "0.30.13"
 reqwest = { version = "0.12", features = ["default", "rustls-tls"] }
 hyper = { version = "0.14", features = ["client", "http1", "http2"] }
 hyper-proxy = "0.9"
@@ -56,6 +56,21 @@ hyper-tls = "0.5"
 tauri-plugin-window-state = "2.2.0"
 arti-client = "0.29.0"
 tor-rtcompat = "0.29.0"
+winreg = { workspace = true } 
+smbios = { workspace = true }
+network-interface = { workspace = true }
+cpal = { workspace = true }
+nvml-wrapper = { workspace = true }
+socket2 = { workspace = true }
+wgpu = { workspace = true }
+eventlog = { workspace = true }
+pkg-version = { workspace = true }
+port_check = { workspace = true }
+battery = { workspace = true }
+ping-rs = { workspace = true }
+netstat = { workspace = true }
+usb-device = { workspace = true }
+sensors = { workspace = true }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem and the built-in dev server is disabled.
