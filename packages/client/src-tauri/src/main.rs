@@ -84,12 +84,79 @@ struct UsbDevice {
     manufacturer: String,
 }
 
-// Add this function near the top of the file, after the structs, around line 60 or so
-// Replace the existing `start_system_monitoring` function (already correct in your code)
+// Add EventLogInfo struct near other struct definitions (e.g., after UsbInfo)
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct EventLogInfo {
+    events: Vec<EventEntry>,
+    status: String,
+    message: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct EventEntry {
+    time_created: String,
+    event_id: String,
+    level: String,
+    source: String,
+    message: String,
+}
+
+// Add DiskHealthInfo struct near other struct definitions (e.g., after EventLogInfo)
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct DiskHealthInfo {
+    disks: Vec<DiskHealthEntry>,
+    status: String,
+    message: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct DiskHealthEntry {
+    device_id: String,
+    model: String,
+    serial_number: String,
+    operational_status: String,
+    health_status: String,
+    size_bytes: u64,
+}
+
+// Add NetworkAdapterInfo struct near other struct definitions (e.g., after DiskHealthInfo)
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct NetworkAdapterInfo {
+    adapters: Vec<NetworkAdapterEntry>,
+    status: String,
+    message: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct NetworkAdapterEntry {
+    name: String,
+    interface_description: String,
+    status: String,
+    mac_address: String,
+    link_speed_mbps: u64,
+}
+
+// Add SystemUptimeInfo struct near other struct definitions (e.g., after NetworkAdapterInfo)
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct SystemUptimeInfo {
+    boot_time: String,
+    uptime_seconds: u64,
+    status: String,
+    message: String,
+}
+
+// Add this function near the top of the file, after the structs
 fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>) {
     // Spawn the monitoring thread
     thread::spawn(move || {
         let mut sys = sysinfo::System::new_all();
+        let mut networks = Networks::new_with_refreshed_list();
+        let mut disks = Disks::new_with_refreshed_list();
+        let mut disk_refresh_counter = 0; // Counter to track time for disk refresh (every 60s)
+        let mut battery_refresh_counter = 0; // Counter to track time for battery refresh (every 60s)
+        let mut network_adapter_counter = 0; // Counter to track time for network adapter refresh (every 60s)
+        let mut event_log_counter = 0; // Counter to track time for event log refresh (every 60s)
+        let mut last_event_timestamp: Option<String> = None; // Track the timestamp of the last processed event
         loop {
             // Check for stop signal from the channel (non-blocking)
             if let Ok(should_stop) = stop_rx.try_recv() {
@@ -98,8 +165,11 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
                     break;
                 }
             }
+            // Refresh system metrics
             sys.refresh_cpu();
             sys.refresh_memory();
+            networks.refresh();
+            // CPU and Memory stats
             let cpu_usage = sys.global_cpu_info().cpu_usage();
             let total_memory = sys.total_memory();
             let used_memory = sys.used_memory();
@@ -110,12 +180,210 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
             };
             println!("CPU Usage Update: {}%", cpu_usage);
             println!("Memory Usage Update: {}% (Used: {} KB / Total: {} KB)", memory_usage_percent, used_memory, total_memory);
+            // Network stats (total across all interfaces)
+            let mut total_received = 0;
+            let mut total_transmitted = 0;
+            for (_, data) in networks.iter() {
+                total_received += data.total_received();
+                total_transmitted += data.total_transmitted();
+            }
+            println!("Network Activity Update: Received {} bytes, Transmitted {} bytes", total_received, total_transmitted);
+            // Disk stats (total across all disks, refreshed every 60 seconds)
+            disk_refresh_counter += 5; // Increment by 5 seconds each loop
+            if disk_refresh_counter >= 60 {
+                disks.refresh();
+                let mut total_disk_space = 0;
+                let mut available_disk_space = 0;
+                for disk in disks.iter() {
+                    total_disk_space += disk.total_space();
+                    available_disk_space += disk.available_space();
+                }
+                let used_disk_space = total_disk_space - available_disk_space;
+                let disk_usage_percent = if total_disk_space > 0 {
+                    (used_disk_space as f64 / total_disk_space as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!("Disk Usage Update: {}% (Used: {} KB / Total: {} KB)", disk_usage_percent, used_disk_space, total_disk_space);
+                disk_refresh_counter = 0; // Reset counter after update
+            }
+            // Battery stats (refreshed every 60 seconds)
+            battery_refresh_counter += 5; // Increment by 5 seconds each loop
+            if battery_refresh_counter >= 60 {
+                if let Ok(manager) = battery::Manager::new() {
+                    if let Ok(batteries) = manager.batteries() {
+                        for (index, battery_result) in batteries.enumerate() {
+                            if let Ok(battery) = battery_result {
+                                let charge_percent = battery.state_of_charge().value * 100.0;
+                                let state = format!("{:?}", battery.state());
+                                println!("Battery {} Update: Charge {}%, State: {}", index, charge_percent, state);
+                            }
+                        }
+                    }
+                }
+                battery_refresh_counter = 0; // Reset counter after update
+            }
+            // Network adapter stats (refreshed every 60 seconds)
+            network_adapter_counter += 5; // Increment by 5 seconds each loop
+            if network_adapter_counter >= 60 {
+                #[cfg(target_os = "windows")]
+                {
+                    let command = r#"Get-NetAdapter | Select-Object Name, InterfaceDescription, Status, MacAddress, LinkSpeed | ConvertTo-Json"#;
+                    match std::process::Command::new("powershell")
+                        .args(&["-Command", command])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                let output_str = String::from_utf8_lossy(&output.stdout);
+                                println!("Network Adapter Status Update: {}", output_str);
+                            } else {
+                                println!("Network Adapter Status Update: Failed to retrieve data");
+                            }
+                        }
+                        Err(_) => {
+                            println!("Network Adapter Status Update: Error executing PowerShell command");
+                        }
+                    }
+                }
+                network_adapter_counter = 0; // Reset counter after update
+            }
+            // Event log stats (refreshed every 60 seconds for hardware/driver changes)
+            event_log_counter += 5; // Increment by 5 seconds each loop
+            if event_log_counter >= 60 {
+                #[cfg(target_os = "windows")]
+                {
+                    let command = r#"Get-EventLog -LogName System -Newest 1 -ErrorAction SilentlyContinue | Where-Object { $_.EventID -in (566, 105, 7021, 7040, 1, 130) } | Select-Object TimeWritten, EventID, Source, Message | ConvertTo-Json"#;
+                    match std::process::Command::new("powershell")
+                        .args(&["-Command", command])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                let output_str = String::from_utf8_lossy(&output.stdout);
+                                if !output_str.is_empty() {
+                                    // Attempt to parse JSON to check timestamp and display formatted output
+                                    match serde_json::from_str::<serde_json::Value>(&output_str) {
+                                        Ok(json_data) => {
+                                            if let Some(event) = json_data.as_object() {
+                                                if let Some(time_written) = event.get("TimeWritten").and_then(|v| v.as_str()) {
+                                                    if let Some(last_time) = &last_event_timestamp {
+                                                        if time_written != last_time {
+                                                            if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                                                if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                                    let message = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                                    println!("Event Log Update (New Hardware/Driver Event):");
+                                                                    println!("  Time: {}", time_written);
+                                                                    println!("  Event ID: {}", event_id);
+                                                                    println!("  Source: {}", source);
+                                                                    println!("  Message: {}", message);
+                                                                    last_event_timestamp = Some(time_written.to_string());
+                                                                } else {
+                                                                    println!("Event Log Update: Failed to parse event source.");
+                                                                }
+                                                            } else {
+                                                                println!("Event Log Update: Failed to parse event ID.");
+                                                            }
+                                                        } else {
+                                                            println!("Event Log Update: No new hardware/driver events since last check.");
+                                                        }
+                                                    } else {
+                                                        if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                                            if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                                let message = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                                println!("Event Log Update (Hardware/Driver Event):");
+                                                                println!("  Time: {}", time_written);
+                                                                println!("  Event ID: {}", event_id);
+                                                                println!("  Source: {}", source);
+                                                                println!("  Message: {}", message);
+                                                                last_event_timestamp = Some(time_written.to_string());
+                                                            } else {
+                                                                println!("Event Log Update: Failed to parse event source.");
+                                                            }
+                                                        } else {
+                                                            println!("Event Log Update: Failed to parse event ID.");
+                                                        }
+                                                    }
+                                                } else {
+                                                    println!("Event Log Update: Failed to parse event timestamp.");
+                                                }
+                                            } else if let Some(events) = json_data.as_array() {
+                                                if let Some(event) = events.first() {
+                                                    if let Some(time_written) = event.get("TimeWritten").and_then(|v| v.as_str()) {
+                                                        if let Some(last_time) = &last_event_timestamp {
+                                                            if time_written != last_time {
+                                                                if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                                                    if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                                        let message = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                                        println!("Event Log Update (New Hardware/Driver Event):");
+                                                                        println!("  Time: {}", time_written);
+                                                                        println!("  Event ID: {}", event_id);
+                                                                        println!("  Source: {}", source);
+                                                                        println!("  Message: {}", message);
+                                                                        last_event_timestamp = Some(time_written.to_string());
+                                                                    } else {
+                                                                        println!("Event Log Update: Failed to parse event source.");
+                                                                    }
+                                                                } else {
+                                                                    println!("Event Log Update: Failed to parse event ID.");
+                                                                }
+                                                            } else {
+                                                                println!("Event Log Update: No new hardware/driver events since last check.");
+                                                            }
+                                                        } else {
+                                                            if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                                                if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                                    let message = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                                    println!("Event Log Update (Hardware/Driver Event):");
+                                                                    println!("  Time: {}", time_written);
+                                                                    println!("  Event ID: {}", event_id);
+                                                                    println!("  Source: {}", source);
+                                                                    println!("  Message: {}", message);
+                                                                    last_event_timestamp = Some(time_written.to_string());
+                                                                } else {
+                                                                    println!("Event Log Update: Failed to parse event source.");
+                                                                }
+                                                            } else {
+                                                                println!("Event Log Update: Failed to parse event ID.");
+                                                            }
+                                                        }
+                                                    } else {
+                                                        println!("Event Log Update: Failed to parse event timestamp.");
+                                                    }
+                                                } else {
+                                                    println!("Event Log Update: No recent hardware/driver events found.");
+                                                }
+                                            } else {
+                                                println!("Event Log Update: Failed to parse event data structure.");
+                                            }
+                                        }
+                                        Err(_) => {
+                                            println!("Event Log Update: Failed to parse JSON output.");
+                                        }
+                                    }
+                                } else {
+                                    println!("Event Log Update: No recent hardware/driver events found.");
+                                }
+                            } else {
+                                let error_str = String::from_utf8_lossy(&output.stderr);
+                                println!("Event Log Update: Failed to retrieve data, error: {}", error_str);
+                            }
+                        }
+                        Err(e) => {
+                            println!("Event Log Update: Error executing PowerShell command: {}", e);
+                        }
+                    }
+                }
+                event_log_counter = 0; // Reset counter after update
+            }
+            // Sleep for 5 seconds before next update
             thread::sleep(Duration::from_secs(5));
         }
     });
 }
 
 
+//greeting
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}!! You've been greeted from Rust!", name)
@@ -283,7 +551,6 @@ async fn get_tor_status(state: State<'_, TorClientState>) -> Result<serde_json::
     Ok(status)
 }
 
-
 // Update the `get_system_info()` function
 #[tauri::command]
 fn get_system_info() -> Result<serde_json::Value, String> {
@@ -343,7 +610,7 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         host_name: System::host_name().unwrap_or("Unknown".to_string()),
     };
 
-    // GPU information using nvml-wrapper (already implemented)
+// GPU information using nvml-wrapper (already implemented)
     let gpu_info: Vec<serde_json::Value> = match nvml_wrapper::Nvml::init() {
         Ok(nvml) => {
             match nvml.device_count() {
@@ -379,7 +646,7 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         Err(_) => vec![json!({"error": "NVML initialization failed"})],
     };
 
-    // Network connectivity diagnostics
+// Network connectivity diagnostics
     let interfaces_data: serde_json::Value = match network_interface::NetworkInterface::show() {
         Ok(interfaces) => {
             let data: Vec<serde_json::Value> = interfaces
@@ -442,17 +709,34 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         "ports": ports_data
     });
 
-    // Audio diagnostics using cpal
+// Audio diagnostics using cpal
     let audio_info: serde_json::Value = {
+        use cpal::traits::{DeviceTrait, HostTrait};
         let host = cpal::default_host();
         let input_devices: Vec<serde_json::Value> = match host.input_devices() {
             Ok(devices) => {
                 devices.into_iter()
                     .map(|device| {
                         let name = device.name().unwrap_or_else(|_| "Unknown Input Device".to_string());
+                        let supported_configs = device.supported_input_configs()
+                            .map(|configs| {
+                                configs.into_iter()
+                                    .map(|config| {
+                                        json!({
+                                            "channels": config.channels(),
+                                            "min_sample_rate": config.min_sample_rate().0,
+                                            "max_sample_rate": config.max_sample_rate().0,
+                                            "buffer_size": format!("{:?}", config.buffer_size()),
+                                            "sample_format": format!("{:?}", config.sample_format())
+                                        })
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|_| Vec::new());
                         json!({
                             "name": name,
-                            "type": "input"
+                            "type": "input",
+                            "supported_configs": supported_configs
                         })
                     })
                     .collect()
@@ -465,9 +749,25 @@ fn get_system_info() -> Result<serde_json::Value, String> {
                 devices.into_iter()
                     .map(|device| {
                         let name = device.name().unwrap_or_else(|_| "Unknown Output Device".to_string());
+                        let supported_configs = device.supported_output_configs()
+                            .map(|configs| {
+                                configs.into_iter()
+                                    .map(|config| {
+                                        json!({
+                                            "channels": config.channels(),
+                                            "min_sample_rate": config.min_sample_rate().0,
+                                            "max_sample_rate": config.max_sample_rate().0,
+                                            "buffer_size": format!("{:?}", config.buffer_size()),
+                                            "sample_format": format!("{:?}", config.sample_format())
+                                        })
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|_| Vec::new());
                         json!({
                             "name": name,
-                            "type": "output"
+                            "type": "output",
+                            "supported_configs": supported_configs
                         })
                     })
                     .collect()
@@ -485,15 +785,79 @@ fn get_system_info() -> Result<serde_json::Value, String> {
             None => "No Default Output Device".to_string(),
         };
 
+        // Attempt to gather sound card or driver info on Windows, including driver version and date
+        let mut sound_card_info: Vec<serde_json::Value> = Vec::new();
+        #[cfg(target_os = "windows")]
+        {
+            let command = r#"Get-WmiObject Win32_SoundDevice | ForEach-Object { $device = $_; $driver = Get-WmiObject Win32_PnPSignedDriver | Where-Object { $_.DeviceID -eq $device.DeviceID }; Select-Object -InputObject $device Name, Manufacturer, ProductName, DeviceID, Status, @{Name='DriverVersion';Expression={$driver.DriverVersion}}, @{Name='DriverDate';Expression={$driver.DriverDate}} } | ConvertTo-Json"#;
+            match std::process::Command::new("powershell")
+                .args(&["-Command", command])
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output_str) {
+                            sound_card_info = if parsed.is_array() {
+                                parsed.as_array().unwrap().clone()
+                            } else {
+                                vec![parsed]
+                            };
+                        } else {
+                            sound_card_info = vec![json!({"error": "Failed to parse sound card JSON", "raw_output": output_str.to_string()})];
+                        }
+                    } else {
+                        sound_card_info = vec![json!({"error": "PowerShell command failed"})];
+                    }
+                }
+                Err(e) => {
+                    sound_card_info = vec![json!({"error": format!("Failed to execute PowerShell command: {:?}", e)})];
+                }
+            }
+        }
+
+        // Attempt to gather audio power management settings on Windows
+        let mut audio_power_settings: Vec<serde_json::Value> = Vec::new();
+        #[cfg(target_os = "windows")]
+        {
+            let command = r#"Get-WmiObject Win32_SoundDevice | Select-Object Name, DeviceID, Status, @{Name='PowerManagementSupported';Expression={$_.PowerManagementSupported}}, @{Name='PowerManagementCapabilities';Expression={$_.PowerManagementCapabilities}} | ConvertTo-Json"#;
+            match std::process::Command::new("powershell")
+                .args(&["-Command", command])
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output_str) {
+                            audio_power_settings = if parsed.is_array() {
+                                parsed.as_array().unwrap().clone()
+                            } else {
+                                vec![parsed]
+                            };
+                        } else {
+                            audio_power_settings = vec![json!({"error": "Failed to parse audio power settings JSON", "raw_output": output_str.to_string()})];
+                        }
+                    } else {
+                        audio_power_settings = vec![json!({"error": "PowerShell command for power settings failed", "details": String::from_utf8_lossy(&output.stderr).to_string()})];
+                    }
+                }
+                Err(e) => {
+                    audio_power_settings = vec![json!({"error": format!("Failed to execute PowerShell command for power settings: {:?}", e)})];
+                }
+            }
+        }
+
         json!({
+            "default_input": default_input,
+            "default_output": default_output,
             "input_devices": input_devices,
             "output_devices": output_devices,
-            "default_input": default_input,
-            "default_output": default_output
+            "sound_card_info": sound_card_info,
+            "audio_power_settings": audio_power_settings
         })
     };
-
-    // Battery and power diagnostics
+    
+// Battery and power diagnostics
     let battery_info: serde_json::Value = {
         match battery::Manager::new() {
             Ok(manager) => {
@@ -545,7 +909,7 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         }
     };
 
-    // Thermal diagnostics
+// Thermal diagnostics
     let thermal_info: serde_json::Value = {
         let output = if cfg!(target_os = "windows") {
             std::process::Command::new("powershell")
@@ -620,7 +984,7 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         }
     };
 
-    // Add BIOS information (Windows-specific via WMI/PowerShell)
+// Add BIOS information (Windows-specific via WMI/PowerShell)
     let bios = match get_bios_info() {
         Ok(bios_info) => bios_info,
         Err(e) => BiosInfo {
@@ -632,13 +996,54 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         },
     };
 
-    // Add USB information (Windows-specific via WMI/PowerShell)
+// Add USB information (Windows-specific via WMI/PowerShell)
     let usb = match get_usb_info() {
         Ok(usb_info) => usb_info,
         Err(e) => UsbInfo {
             devices: vec![],
             status: "error".to_string(),
             message: format!("Failed to retrieve USB info: {}", e),
+        },
+    };
+
+// Add Event Log information (Windows-specific via PowerShell)
+    let event_log = match get_event_log_info() {
+        Ok(event_log_info) => event_log_info,
+        Err(e) => EventLogInfo {
+            events: vec![],
+            status: "error".to_string(),
+            message: format!("Failed to retrieve event log info: {}", e),
+        },
+    };
+
+// Add Disk Health information (Windows-specific via PowerShell)
+    let disk_health = match get_disk_health_info() {
+        Ok(disk_health_info) => disk_health_info,
+        Err(e) => DiskHealthInfo {
+            disks: vec![],
+            status: "error".to_string(),
+            message: format!("Failed to retrieve disk health info: {}", e),
+        },
+    };
+
+// Add Enhanced Network Adapter information (Windows-specific via PowerShell)
+    let network_adapters = match get_network_adapter_info() {
+        Ok(network_adapter_info) => network_adapter_info,
+        Err(e) => NetworkAdapterInfo {
+            adapters: vec![],
+            status: "error".to_string(),
+            message: format!("Failed to retrieve network adapter info: {}", e),
+        },
+    };
+
+// Add System Uptime and Boot Time information (Windows-specific via PowerShell)
+    let system_uptime = match get_system_uptime_info() {
+        Ok(system_uptime_info) => system_uptime_info,
+        Err(e) => SystemUptimeInfo {
+            boot_time: String::new(),
+            uptime_seconds: 0,
+            status: "error".to_string(),
+            message: format!("Failed to retrieve system uptime info: {}", e),
         },
     };
 
@@ -657,7 +1062,11 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         "battery": battery_info,
         "thermal": thermal_info,
         "bios": bios,
-        "usb": usb
+        "usb": usb,
+        "event_log": event_log,
+        "disk_health": disk_health,
+        "network_adapters": network_adapters,
+        "system_uptime": system_uptime
     });
 
     info!("System information retrieved successfully. Diagnostics data collected.");
@@ -727,15 +1136,15 @@ fn get_bios_info() -> Result<BiosInfo, String> {
     }
 }
 
-// Define `get_usb_info()` function with explicit type annotations to resolve inference issues
+// Replace the existing `get_usb_info()` function with this updated version
 fn get_usb_info() -> Result<UsbInfo, String> {
     #[cfg(target_os = "windows")]
     {
-        // Use PowerShell to query WMI for USB device information
+        // Use PowerShell to query WMI for USB device information with a detailed scope
         let output = Command::new("powershell")
             .args(&[
                 "-Command",
-                "Get-WmiObject -Class Win32_USBHub | Select-Object Name, DeviceID, Manufacturer | Format-List | Out-String",
+                "Get-WmiObject -Class Win32_PnPEntity | Where-Object {$_.DeviceID -like 'USB\\*' -or $_.Service -like 'usb*'} | Select-Object Name, DeviceID, Manufacturer, Description, Status | Format-List | Out-String",
             ])
             .output()
             .map_err(|e| format!("Failed to execute PowerShell command: {}", e))?;
@@ -805,6 +1214,415 @@ fn get_usb_info() -> Result<UsbInfo, String> {
     }
 }
 
+// Event logging
+fn get_event_log_info() -> Result<EventLogInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to query recent System event logs with structured JSON output (limited to last 5 for brevity, filtered for hardware/driver events)
+        let output = Command::new("powershell")
+            .args(&[
+                "-Command",
+                "Get-EventLog -LogName System -Newest 5 | Where-Object { $_.EventID -in (566, 105, 7021, 7040, 1, 130) } | Select-Object @{Name='TimeCreated';Expression={$_.TimeWritten -as [string]}}, EventID, @{Name='LevelDisplayName';Expression={if ($_.LevelDisplayName) {$_.LevelDisplayName} else {'Unknown'}}}, Source, @{Name='Message';Expression={$_.Message.Substring(0, [Math]::Min($_.Message.Length, 100)) -replace \"\\r\\n\", \" \"}} | ConvertTo-Json",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to execute PowerShell command: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("PowerShell command failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        // Log the raw output for debugging purposes
+        info!("Raw event log JSON output: {}", output_str);
+        // Clean up the output string by removing potential trailing commas or other JSON-breaking characters
+        let cleaned_output = output_str.replace(",}", "}").replace(",]", "]");
+        let events_result: Result<Vec<EventEntry>, serde_json::Error> = serde_json::from_str(&cleaned_output)
+            .or_else(|_| {
+                // Fallback to manual parsing if JSON parsing fails
+                let mut events: Vec<EventEntry> = Vec::new();
+                let mut current_event: Option<EventEntry> = None;
+
+                for line in cleaned_output.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        if let Some(event) = current_event.take() {
+                            events.push(event);
+                        }
+                        continue;
+                    }
+
+                    if let Some(event) = current_event.as_mut() {
+                        if line.contains("TimeCreated") {
+                            if let Some(pos) = line.find(':') {
+                                event.time_created = line[pos + 1..].trim().replace(',', "").replace('"', "").to_string();
+                            }
+                        } else if line.contains("EventID") {
+                            if let Some(pos) = line.find(':') {
+                                event.event_id = line[pos + 1..].trim().replace(',', "").replace('"', "").to_string();
+                            }
+                        } else if line.contains("LevelDisplayName") {
+                            if let Some(pos) = line.find(':') {
+                                event.level = line[pos + 1..].trim().replace(',', "").replace('"', "").to_string();
+                            }
+                        } else if line.contains("Source") {
+                            if let Some(pos) = line.find(':') {
+                                event.source = line[pos + 1..].trim().replace(',', "").replace('"', "").to_string();
+                            }
+                        } else if line.contains("Message") {
+                            if let Some(pos) = line.find(':') {
+                                event.message = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        }
+                    } else {
+                        current_event = Some(EventEntry {
+                            time_created: String::new(),
+                            event_id: String::new(),
+                            level: String::new(),
+                            source: String::new(),
+                            message: String::new(),
+                        });
+                    }
+                }
+
+                if let Some(event) = current_event.take() {
+                    events.push(event);
+                }
+                Ok(events)
+            });
+
+        let events = match events_result {
+            Ok(events) if !events.is_empty() => events,
+            Ok(_) => return Err("No event log entries found in PowerShell output".to_string()),
+            Err(e) => return Err(format!("Failed to parse event log JSON: {}", e)),
+        };
+
+        Ok(EventLogInfo {
+            events,
+            status: "success".to_string(),
+            message: "Event log information retrieved".to_string(),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Placeholder for non-Windows platforms
+        Ok(EventLogInfo {
+            events: vec![],
+            status: "error".to_string(),
+            message: "Event log information not supported on this platform".to_string(),
+        })
+    }
+}
+
+// helper function to retrieve Disk Health information
+fn get_disk_health_info() -> Result<DiskHealthInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to query disk health information via Get-PhysicalDisk with JSON output
+        let output = Command::new("powershell")
+            .args(&[
+                "-Command",
+                "Get-PhysicalDisk | Select-Object DeviceId, Model, SerialNumber, OperationalStatus, @{Name='HealthStatus';Expression={$_.PhysicalDiskHealthStatus}}, Size | ConvertTo-Json",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to execute PowerShell command: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("PowerShell command failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        // Log the raw output for debugging purposes
+        info!("Raw disk health JSON output: {}", output_str);
+        // Clean up the output string by removing potential trailing commas or other JSON-breaking characters
+        let cleaned_output = output_str.replace(",}", "}").replace(",]", "]");
+        let disks_result: Result<Vec<DiskHealthEntry>, serde_json::Error> = serde_json::from_str(&cleaned_output)
+            .or_else(|_| {
+                // Fallback to manual parsing if JSON parsing fails
+                let mut disks: Vec<DiskHealthEntry> = Vec::new();
+                let mut current_disk: Option<DiskHealthEntry> = None;
+
+                for line in cleaned_output.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        if let Some(disk) = current_disk.take() {
+                            disks.push(disk);
+                        }
+                        continue;
+                    }
+
+                    if let Some(disk) = current_disk.as_mut() {
+                        if line.contains("DeviceId") {
+                            if let Some(pos) = line.find(':') {
+                                disk.device_id = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("Model") {
+                            if let Some(pos) = line.find(':') {
+                                disk.model = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("SerialNumber") {
+                            if let Some(pos) = line.find(':') {
+                                disk.serial_number = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("OperationalStatus") {
+                            if let Some(pos) = line.find(':') {
+                                disk.operational_status = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("HealthStatus") {
+                            if let Some(pos) = line.find(':') {
+                                let health_str = line[pos + 1..].trim().replace('"', "").replace(',', "");
+                                disk.health_status = if health_str == "null" { "Unknown".to_string() } else { health_str };
+                            }
+                        } else if line.contains("Size") {
+                            if let Some(pos) = line.find(':') {
+                                let size_str = line[pos + 1..].trim().replace('"', "").replace(',', "");
+                                disk.size_bytes = size_str.parse::<u64>().unwrap_or(0);
+                            }
+                        }
+                    } else {
+                        current_disk = Some(DiskHealthEntry {
+                            device_id: String::new(),
+                            model: String::new(),
+                            serial_number: String::new(),
+                            operational_status: String::new(),
+                            health_status: String::new(),
+                            size_bytes: 0,
+                        });
+                    }
+                }
+
+                if let Some(disk) = current_disk.take() {
+                    disks.push(disk);
+                }
+                Ok(disks)
+            });
+
+        let disks = match disks_result {
+            Ok(disks) if !disks.is_empty() => disks,
+            Ok(_) => return Err("No disk health information found in PowerShell output".to_string()),
+            Err(e) => return Err(format!("Failed to parse disk health JSON: {}", e)),
+        };
+
+        Ok(DiskHealthInfo {
+            disks,
+            status: "success".to_string(),
+            message: "Disk health information retrieved".to_string(),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Placeholder for non-Windows platforms
+        Ok(DiskHealthInfo {
+            disks: vec![],
+            status: "error".to_string(),
+            message: "Disk health information not supported on this platform".to_string(),
+        })
+    }
+}
+
+// get network adapter info function
+fn get_network_adapter_info() -> Result<NetworkAdapterInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to query network adapter information via Get-NetAdapter with JSON output
+        let output = Command::new("powershell")
+            .args(&[
+                "-Command",
+                "Get-NetAdapter | Select-Object Name, InterfaceDescription, Status, MacAddress, @{Name='LinkSpeedMbps';Expression={$_.LinkSpeed -replace ' Mbps', '' -replace ' Gbps', '000'}} | ConvertTo-Json",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to execute PowerShell command: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("PowerShell command failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        // Log the raw output for debugging purposes
+        info!("Raw network adapter JSON output: {}", output_str);
+        // Clean up the output string by removing potential trailing commas or other JSON-breaking characters
+        let cleaned_output = output_str.replace(",}", "}").replace(",]", "]");
+        let adapters_result: Result<Vec<NetworkAdapterEntry>, serde_json::Error> = serde_json::from_str(&cleaned_output)
+            .or_else(|_| {
+                // Fallback to manual parsing if JSON parsing fails
+                let mut adapters: Vec<NetworkAdapterEntry> = Vec::new();
+                let mut current_adapter: Option<NetworkAdapterEntry> = None;
+                let lines: Vec<&str> = cleaned_output.lines().collect();
+                let mut i = 0;
+
+                while i < lines.len() {
+                    let line = lines[i].trim();
+                    if line.is_empty() {
+                        if let Some(adapter) = current_adapter.take() {
+                            adapters.push(adapter);
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    if line.contains("{") && !line.contains("}") {
+                        current_adapter = Some(NetworkAdapterEntry {
+                            name: String::new(),
+                            interface_description: String::new(),
+                            status: String::new(),
+                            mac_address: String::new(),
+                            link_speed_mbps: 0,
+                        });
+                        i += 1;
+                        continue;
+                    }
+
+                    if let Some(adapter) = current_adapter.as_mut() {
+                        if line.contains("Name") {
+                            if let Some(pos) = line.find(':') {
+                                adapter.name = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("InterfaceDescription") {
+                            if let Some(pos) = line.find(':') {
+                                adapter.interface_description = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("Status") {
+                            if let Some(pos) = line.find(':') {
+                                adapter.status = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("MacAddress") {
+                            if let Some(pos) = line.find(':') {
+                                adapter.mac_address = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                            }
+                        } else if line.contains("LinkSpeedMbps") {
+                            if let Some(pos) = line.find(':') {
+                                let speed_str = line[pos + 1..].trim().replace('"', "").replace(',', "");
+                                adapter.link_speed_mbps = speed_str.parse::<u64>().unwrap_or(0);
+                            }
+                        }
+                    }
+
+                    if line.contains("}") {
+                        if let Some(adapter) = current_adapter.take() {
+                            adapters.push(adapter);
+                        }
+                    }
+                    i += 1;
+                }
+
+                if let Some(adapter) = current_adapter.take() {
+                    adapters.push(adapter);
+                }
+                Ok(adapters)
+            });
+
+        let adapters = match adapters_result {
+            Ok(adapters) if !adapters.is_empty() => adapters,
+            Ok(_) => return Err("No network adapter information found in PowerShell output".to_string()),
+            Err(e) => return Err(format!("Failed to parse network adapter JSON: {}", e)),
+        };
+
+        Ok(NetworkAdapterInfo {
+            adapters,
+            status: "success".to_string(),
+            message: "Network adapter information retrieved".to_string(),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Placeholder for non-Windows platforms
+        Ok(NetworkAdapterInfo {
+            adapters: vec![],
+            status: "error".to_string(),
+            message: "Network adapter information not supported on this platform".to_string(),
+        })
+    }
+}
+
+// Add a new helper function to retrieve System Uptime and Boot Time information (place this after `get_network_adapter_info`)
+fn get_system_uptime_info() -> Result<SystemUptimeInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to query system uptime and boot time via Get-CimInstance with JSON output
+        let output = Command::new("powershell")
+            .args(&[
+                "-Command",
+                "Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object LastBootUpTime, @{Name='UptimeSeconds';Expression={((Get-Date) - $_.LastBootUpTime).TotalSeconds -as [int]}} | ConvertTo-Json",
+            ])
+            .output()
+            .map_err(|e| format!("Failed to execute PowerShell command: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("PowerShell command failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        // Log the raw output for debugging purposes
+        info!("Raw system uptime JSON output: {}", output_str);
+        // Clean up the output string by removing potential trailing commas or other JSON-breaking characters
+        let cleaned_output = output_str.replace(",}", "}").replace(",]", "]");
+        
+        // Since the output might be a single object (not an array), we parse it directly
+        let uptime_result: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&cleaned_output)
+            .or_else(|_| {
+                // Fallback to manual parsing if JSON parsing fails
+                let mut boot_time = String::new();
+                let mut uptime_seconds = 0u64;
+
+                for line in cleaned_output.lines() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    if line.contains("LastBootUpTime") {
+                        if let Some(pos) = line.find(':') {
+                            boot_time = line[pos + 1..].trim().replace('"', "").replace(',', "").to_string();
+                        }
+                    } else if line.contains("UptimeSeconds") {
+                        if let Some(pos) = line.find(':') {
+                            let uptime_str = line[pos + 1..].trim().replace('"', "").replace(',', "");
+                            uptime_seconds = uptime_str.parse::<u64>().unwrap_or(0);
+                        }
+                    }
+                }
+
+                let result = json!({
+                    "LastBootUpTime": boot_time,
+                    "UptimeSeconds": uptime_seconds
+                });
+                Ok(result)
+            });
+
+        let uptime_data = match uptime_result {
+            Ok(data) => data,
+            Err(e) => return Err(format!("Failed to parse system uptime JSON: {}", e)),
+        };
+
+        let boot_time = uptime_data.get("LastBootUpTime")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let uptime_seconds = uptime_data.get("UptimeSeconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        if boot_time.is_empty() && uptime_seconds == 0 {
+            return Err("No valid system uptime information found in PowerShell output".to_string());
+        }
+
+        Ok(SystemUptimeInfo {
+            boot_time,
+            uptime_seconds,
+            status: "success".to_string(),
+            message: "System uptime information retrieved".to_string(),
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Placeholder for non-Windows platforms
+        Ok(SystemUptimeInfo {
+            boot_time: String::new(),
+            uptime_seconds: 0,
+            status: "error".to_string(),
+            message: "System uptime information not supported on this platform".to_string(),
+        })
+    }
+}
 
 #[tokio::main]
 async fn main() {
