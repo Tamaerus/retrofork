@@ -157,6 +157,9 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
         let mut network_adapter_counter = 0; // Counter to track time for network adapter refresh (every 60s)
         let mut event_log_counter = 0; // Counter to track time for event log refresh (every 60s)
         let mut last_event_timestamp: Option<String> = None; // Track the timestamp of the last processed event
+        let mut ports_refresh_counter = 0; // Counter to track time for listening ports refresh (every 60s)
+        let mut video_refresh_counter = 0; // Counter to track time for video diagnostics refresh (every 60s)
+
         loop {
             // Check for stop signal from the channel (non-blocking)
             if let Ok(should_stop) = stop_rx.try_recv() {
@@ -225,7 +228,7 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
             }
             // Network adapter stats (refreshed every 60 seconds)
             network_adapter_counter += 5; // Increment by 5 seconds each loop
-            if network_adapter_counter >= 60 {
+            if network_adapter_counter >= 600 {
                 #[cfg(target_os = "windows")]
                 {
                     let command = r#"Get-NetAdapter | Select-Object Name, InterfaceDescription, Status, MacAddress, LinkSpeed | ConvertTo-Json"#;
@@ -248,9 +251,10 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
                 }
                 network_adapter_counter = 0; // Reset counter after update
             }
-            // Event log stats (refreshed every 60 seconds for hardware/driver changes)
+
+// Event log stats (refreshed every 60 seconds for hardware/driver changes)
             event_log_counter += 5; // Increment by 5 seconds each loop
-            if event_log_counter >= 60 {
+            if event_log_counter >= 300 {
                 #[cfg(target_os = "windows")]
                 {
                     let command = r#"Get-EventLog -LogName System -Newest 1 -ErrorAction SilentlyContinue | Where-Object { $_.EventID -in (566, 105, 7021, 7040, 1, 130) } | Select-Object TimeWritten, EventID, Source, Message | ConvertTo-Json"#;
@@ -376,6 +380,21 @@ fn start_system_monitoring(app_handle: tauri::AppHandle, stop_rx: Receiver<bool>
                 }
                 event_log_counter = 0; // Reset counter after update
             }
+            // Listening ports stats (refreshed every 60 seconds)
+            ports_refresh_counter += 5; // Increment by 5 seconds each loop
+            if ports_refresh_counter >= 600 {
+                let listening_ports_info = get_listening_ports();
+                println!("Listening Ports Update: {:?}", listening_ports_info);
+                ports_refresh_counter = 0; // Reset counter after update
+            }
+            // Video diagnostics stats (refreshed every 60 seconds)
+            video_refresh_counter += 5; // Increment by 5 seconds each loop
+            if video_refresh_counter >= 300 {
+                let video_diagnostics_info = get_video_diagnostics();
+                println!("Video Diagnostics Update: {:?}", video_diagnostics_info);
+                video_refresh_counter = 0; // Reset counter after update
+            }
+
             // Sleep for 5 seconds before next update
             thread::sleep(Duration::from_secs(5));
         }
@@ -645,6 +664,8 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         }
         Err(_) => vec![json!({"error": "NVML initialization failed"})],
     };
+// Video and Screen Sharing Diagnostics
+    let video_diagnostics = get_video_diagnostics();
 
 // Network connectivity diagnostics
     let interfaces_data: serde_json::Value = match network_interface::NetworkInterface::show() {
@@ -709,6 +730,12 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         "ports": ports_data
     });
 
+// Networking: Listening Ports
+    let listening_ports_info = get_listening_ports();
+// Firewall Status Diagnostics (for security monitoring)
+    let firewall_status = get_firewall_status();
+// VPN and Proxy Status Diagnostics (for security monitoring)
+    let vpn_proxy_status = get_vpn_proxy_status();
 // Audio diagnostics using cpal
     let audio_info: serde_json::Value = {
         use cpal::traits::{DeviceTrait, HostTrait};
@@ -1047,6 +1074,9 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         },
     };
 
+// Boot Log Diagnostics (for detecting live USB systems like TAILS)
+    let boot_log_diagnostics = get_boot_log_diagnostics();
+    
     let system_info = json!({
         "cpu_count": cpu_count,
         "cpu_usage_percent": cpu_usage,
@@ -1066,7 +1096,12 @@ fn get_system_info() -> Result<serde_json::Value, String> {
         "event_log": event_log,
         "disk_health": disk_health,
         "network_adapters": network_adapters,
-        "system_uptime": system_uptime
+        "system_uptime": system_uptime,
+        "listening_ports": listening_ports_info,
+        "video_diagnostics": video_diagnostics,
+        "boot_log_diagnostics": boot_log_diagnostics,
+        "firewall_status": firewall_status,
+        "vpn_proxy_status": vpn_proxy_status,
     });
 
     info!("System information retrieved successfully. Diagnostics data collected.");
@@ -1623,6 +1658,454 @@ fn get_system_uptime_info() -> Result<SystemUptimeInfo, String> {
         })
     }
 }
+
+// Helper function to get listening ports using netstat crate
+fn get_listening_ports() -> serde_json::Value {
+    use netstat::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo};
+    use serde_json::json;
+
+    let mut listening_ports = Vec::new();
+
+    // Attempt to retrieve socket information for TCP and UDP
+    let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;
+    let proto_flags = ProtocolFlags::TCP | ProtocolFlags::UDP;
+    match get_sockets_info(af_flags, proto_flags) {
+        Ok(sockets) => {
+            for socket in sockets {
+                match &socket.protocol_socket_info {
+                    ProtocolSocketInfo::Tcp(tcp_info) => {
+                        // Directly access state since it's not an Option
+                        let state_str = tcp_info.state.to_string();
+                        // Check if state indicates listening (case-insensitive)
+                        if state_str.to_lowercase().contains("listen") {
+                            listening_ports.push(json!({
+                                "protocol": "TCP",
+                                "local_address": tcp_info.local_addr.to_string(),
+                                "local_port": tcp_info.local_port,
+                                "state": state_str,
+                                "associated_pids": socket.associated_pids
+                            }));
+                        }
+                    }
+                    ProtocolSocketInfo::Udp(udp_info) => {
+                        // UDP doesn't have a "state" like TCP, list active UDP sockets
+                        listening_ports.push(json!({
+                            "protocol": "UDP",
+                            "local_address": udp_info.local_addr.to_string(),
+                            "local_port": udp_info.local_port,
+                            "state": "N/A",
+                            "associated_pids": socket.associated_pids
+                        }));
+                    }
+                }
+            }
+            json!({
+                "status": "success",
+                "message": "Listening ports information retrieved",
+                "ports": listening_ports
+            })
+        }
+        Err(e) => json!({
+            "status": "error",
+            "message": format!("Failed to retrieve listening ports: {}", e),
+            "ports": []
+        }),
+    }
+}
+
+// Helper function to get video hardware and screen sharing diagnostics using sysinfo
+fn get_video_diagnostics() -> serde_json::Value {
+    use sysinfo::{Components, System};
+    use serde_json::json;
+
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let mut video_adapters = Vec::new();
+    let components = Components::new_with_refreshed_list();
+    
+    // Gather video adapter information (if available through sysinfo components)
+    for component in components.iter() {
+        let label = component.label().to_lowercase();
+        if label.contains("video") || label.contains("graphics") || label.contains("gpu") {
+            video_adapters.push(json!({
+                "label": component.label(),
+                "temperature": component.temperature(),
+                "critical_temp": component.critical().unwrap_or(0.0),
+                "max_temp": component.max()
+            }));
+        }
+    }
+
+    // Fallback if no video-specific components are found
+    if video_adapters.is_empty() {
+        video_adapters.push(json!({
+            "label": "Video adapter information not available via sysinfo",
+            "temperature": "N/A",
+            "critical_temp": "N/A",
+            "max_temp": "N/A"
+        }));
+    }
+
+    // Check for potential screen sharing processes (basic heuristic based on common process names)
+    sys.refresh_processes();
+    let mut potential_screen_sharing = Vec::new();
+    for (pid, process) in sys.processes() {
+        let name = process.name().to_lowercase();
+        if name.contains("teamviewer") || name.contains("anydesk") || name.contains("rdp") || 
+           name.contains("remote") || name.contains("zoom") || name.contains("skype") {
+            potential_screen_sharing.push(json!({
+                "pid": pid.to_string(),
+                "name": process.name(),
+                "cpu_usage": process.cpu_usage(),
+                "memory": process.memory()
+            }));
+        }
+    }
+
+    json!({
+        "status": "success",
+        "message": "Video and screen sharing diagnostics retrieved",
+        "video_adapters": video_adapters,
+        "potential_screen_sharing": potential_screen_sharing
+    })
+}
+
+// Helper function to get boot log diagnostics (for detecting live USB systems like TAILS)
+fn get_boot_log_diagnostics() -> serde_json::Value {
+    use serde_json::json;
+    use std::process::Command;
+
+    let mut boot_events = Vec::new();
+    let mut status = "success";
+    let mut message = "Boot log diagnostics retrieved";
+    let mut error_message_storage = String::new(); // Storage for error messages to ensure lifetime
+
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to get boot-related events from System log
+        let command = r#"Get-EventLog -LogName System -Source Microsoft-Windows-Kernel-Boot -Newest 5 -ErrorAction SilentlyContinue | Select-Object TimeWritten, EventID, Source, Message | ConvertTo-Json"#;
+        match Command::new("powershell")
+            .args(&["-Command", command])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    if !output_str.is_empty() {
+                        // Attempt to parse JSON output
+                        match serde_json::from_str::<serde_json::Value>(&output_str) {
+                            Ok(json_data) => {
+                                if let Some(events) = json_data.as_array() {
+                                    for event in events {
+                                        if let Some(time_written) = event.get("TimeWritten").and_then(|v| v.as_str()) {
+                                            if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                                if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                    let message_text = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                    boot_events.push(json!({
+                                                        "time_created": time_written,
+                                                        "event_id": event_id,
+                                                        "source": source,
+                                                        "message": message_text
+                                                    }));
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if let Some(event) = json_data.as_object() {
+                                    if let Some(time_written) = event.get("TimeWritten").and_then(|v| v.as_str()) {
+                                        if let Some(event_id) = event.get("EventID").and_then(|v| v.as_i64()) {
+                                            if let Some(source) = event.get("Source").and_then(|v| v.as_str()) {
+                                                let message_text = event.get("Message").and_then(|v| v.as_str()).unwrap_or("Message not available");
+                                                boot_events.push(json!({
+                                                    "time_created": time_written,
+                                                    "event_id": event_id,
+                                                    "source": source,
+                                                    "message": message_text
+                                                }));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                status = "error";
+                                error_message_storage = format!("Failed to parse boot log JSON: {}", e);
+                                message = &error_message_storage;
+                            }
+                        }
+                    } else {
+                        status = "warning";
+                        message = "No boot log events found";
+                    }
+                } else {
+                    let error_str = String::from_utf8_lossy(&output.stderr);
+                    status = "error";
+                    error_message_storage = format!("Failed to retrieve boot logs: {}", error_str);
+                    message = &error_message_storage;
+                }
+            }
+            Err(e) => {
+                status = "error";
+                error_message_storage = format!("Error executing PowerShell command for boot logs: {}", e);
+                message = &error_message_storage;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        status = "warning";
+        message = "Boot log diagnostics not supported on non-Windows platforms";
+    }
+
+    json!({
+        "status": status,
+        "message": message,
+        "boot_events": boot_events
+    })
+}
+
+// Helper function to get firewall status diagnostics (for security monitoring)
+fn get_firewall_status() -> serde_json::Value {
+    use serde_json::json;
+    use std::process::Command;
+
+    let mut firewall_profiles = Vec::new();
+    let mut status = "success";
+    let mut message = "Firewall status diagnostics retrieved";
+    let mut error_message_storage = String::new(); // Storage for error messages to ensure lifetime
+
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to get firewall status for all profiles
+        let command = r#"Get-NetFirewallProfile | Select-Object Name, Enabled, DefaultInboundAction, DefaultOutboundAction | ConvertTo-Json"#;
+        match Command::new("powershell")
+            .args(&["-Command", command])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    if !output_str.is_empty() {
+                        // Attempt to parse JSON output
+                        match serde_json::from_str::<serde_json::Value>(&output_str) {
+                            Ok(json_data) => {
+                                if let Some(profiles) = json_data.as_array() {
+                                    for profile in profiles {
+                                        if let Some(name) = profile.get("Name").and_then(|v| v.as_str()) {
+                                            if let Some(enabled) = profile.get("Enabled").and_then(|v| v.as_bool()) {
+                                                let inbound_action = profile.get("DefaultInboundAction").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                                let outbound_action = profile.get("DefaultOutboundAction").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                                firewall_profiles.push(json!({
+                                                    "profile_name": name,
+                                                    "enabled": enabled,
+                                                    "default_inbound_action": inbound_action,
+                                                    "default_outbound_action": outbound_action
+                                                }));
+                                            }
+                                        }
+                                    }
+                                } else if let Some(profile) = json_data.as_object() {
+                                    if let Some(name) = profile.get("Name").and_then(|v| v.as_str()) {
+                                        if let Some(enabled) = profile.get("Enabled").and_then(|v| v.as_bool()) {
+                                            let inbound_action = profile.get("DefaultInboundAction").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                            let outbound_action = profile.get("DefaultOutboundAction").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                            firewall_profiles.push(json!({
+                                                "profile_name": name,
+                                                "enabled": enabled,
+                                                "default_inbound_action": inbound_action,
+                                                "default_outbound_action": outbound_action
+                                            }));
+                                        }
+                                    }
+                                }
+                                if firewall_profiles.is_empty() {
+                                    status = "warning";
+                                    message = "No firewall profile data found";
+                                }
+                            }
+                            Err(e) => {
+                                status = "error";
+                                error_message_storage = format!("Failed to parse firewall status JSON: {}", e);
+                                message = &error_message_storage;
+                            }
+                        }
+                    } else {
+                        status = "warning";
+                        message = "No firewall status data returned";
+                    }
+                } else {
+                    let error_str = String::from_utf8_lossy(&output.stderr);
+                    status = "error";
+                    error_message_storage = format!("Failed to retrieve firewall status: {}", error_str);
+                    message = &error_message_storage;
+                }
+            }
+            Err(e) => {
+                status = "error";
+                error_message_storage = format!("Error executing PowerShell command for firewall status: {}", e);
+                message = &error_message_storage;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        status = "warning";
+        message = "Firewall status diagnostics not supported on non-Windows platforms";
+    }
+
+    json!({
+        "status": status,
+        "message": message,
+        "firewall_profiles": firewall_profiles
+    })
+}
+
+// Helper function to get VPN/proxy status diagnostics (for security monitoring)
+fn get_vpn_proxy_status() -> serde_json::Value {
+    use serde_json::json;
+    use std::process::Command;
+
+    let mut vpn_connections = Vec::new();
+    let mut proxy_info = Vec::new();
+    let mut status = "success";
+    let mut message = "VPN and proxy status diagnostics retrieved";
+    let mut error_message_storage = String::new(); // Storage for error messages to ensure lifetime
+
+    #[cfg(target_os = "windows")]
+    {
+        // Check for active VPN connections using PowerShell (e.g., RAS or VPN adapters)
+        let vpn_command = r#"Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*VPN*' -or $_.InterfaceDescription -like '*Tunnel*' } | Select-Object Name, Status, InterfaceDescription | ConvertTo-Json"#;
+        match Command::new("powershell")
+            .args(&["-Command", vpn_command])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    if !output_str.is_empty() {
+                        // Attempt to parse JSON output for VPN connections
+                        match serde_json::from_str::<serde_json::Value>(&output_str) {
+                            Ok(json_data) => {
+                                if let Some(adapters) = json_data.as_array() {
+                                    for adapter in adapters {
+                                        if let Some(name) = adapter.get("Name").and_then(|v| v.as_str()) {
+                                            if let Some(status_val) = adapter.get("Status").and_then(|v| v.as_str()) {
+                                                let description = adapter.get("InterfaceDescription").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                                vpn_connections.push(json!({
+                                                    "name": name,
+                                                    "status": status_val,
+                                                    "description": description
+                                                }));
+                                            }
+                                        }
+                                    }
+                                } else if let Some(adapter) = json_data.as_object() {
+                                    if let Some(name) = adapter.get("Name").and_then(|v| v.as_str()) {
+                                        if let Some(status_val) = adapter.get("Status").and_then(|v| v.as_str()) {
+                                            let description = adapter.get("InterfaceDescription").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                            vpn_connections.push(json!({
+                                                "name": name,
+                                                "status": status_val,
+                                                "description": description
+                                            }));
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                status = "error";
+                                error_message_storage = format!("Failed to parse VPN adapter JSON: {}", e);
+                                message = &error_message_storage;
+                            }
+                        }
+                    }
+                } else {
+                    let error_str = String::from_utf8_lossy(&output.stderr);
+                    status = "error";
+                    error_message_storage = format!("Failed to retrieve VPN adapter status: {}", error_str);
+                    message = &error_message_storage;
+                }
+            }
+            Err(e) => {
+                status = "error";
+                error_message_storage = format!("Error executing PowerShell command for VPN status: {}", e);
+                message = &error_message_storage;
+            }
+        }
+
+        // Check for proxy settings using PowerShell (e.g., Internet Options proxy)
+        let proxy_command = r#"Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' | Select-Object ProxyEnable, ProxyServer | ConvertTo-Json"#;
+        match Command::new("powershell")
+            .args(&["-Command", proxy_command])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    if !output_str.is_empty() {
+                        // Attempt to parse JSON output for proxy settings
+                        match serde_json::from_str::<serde_json::Value>(&output_str) {
+                            Ok(json_data) => {
+                                if let Some(settings) = json_data.as_object() {
+                                    if let Some(proxy_enable) = settings.get("ProxyEnable").and_then(|v| v.as_i64()) {
+                                        let proxy_server = settings.get("ProxyServer").and_then(|v| v.as_str()).unwrap_or("Not set");
+                                        proxy_info.push(json!({
+                                            "proxy_enabled": proxy_enable == 1,
+                                            "proxy_server": proxy_server
+                                        }));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                if status != "error" { // Only overwrite if no prior error
+                                    status = "warning";
+                                    error_message_storage = format!("Failed to parse proxy settings JSON: {}", e);
+                                    message = &error_message_storage;
+                                }
+                            }
+                        }
+                    } else {
+                        if status != "error" { // Only overwrite if no prior error
+                            status = "warning";
+                            message = "No proxy settings data returned";
+                        }
+                    }
+                } else {
+                    let error_str = String::from_utf8_lossy(&output.stderr);
+                    if status != "error" { // Only overwrite if no prior error
+                        status = "warning";
+                        error_message_storage = format!("Failed to retrieve proxy settings: {}", error_str);
+                        message = &error_message_storage;
+                    }
+                }
+            }
+            Err(e) => {
+                if status != "error" { // Only overwrite if no prior error
+                    status = "warning";
+                    error_message_storage = format!("Error executing PowerShell command for proxy settings: {}", e);
+                    message = &error_message_storage;
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        status = "warning";
+        message = "VPN and proxy status diagnostics not supported on non-Windows platforms";
+    }
+
+    json!({
+        "status": status,
+        "message": message,
+        "vpn_connections": vpn_connections,
+        "proxy_info": proxy_info
+    })
+}
+
 
 #[tokio::main]
 async fn main() {
